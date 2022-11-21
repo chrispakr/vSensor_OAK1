@@ -84,13 +84,19 @@ class PublishTopics:
         # VisionSensorController (vsCtrl)
         self.set_vsCtrl_filmTypeIsNegative = PublishTopicItem("vsController/setFilmTypeIsNegative")
         self.set_vsCtrl_parameter_sensorExposureTime = PublishTopicItem("vsController/setConfig/sensorExposureTime")
+        self.set_vsCtrl_enable_low_contrast_mode = PublishTopicItem("vsController/enable_lcm")
+        self.set_vsCtrl_centerImage = PublishTopicItem("vsController/setConfig/centerImage")
 
+        self.set_vsCtrl_vsFront_enableLiveView = PublishTopicItem("vsController/vsFront/enableLiveView")
+        self.set_vsCtrl_vsFront_focusCamera = PublishTopicItem("vsController/vsFront/focusCamera")
         self.set_vsCtrl_parameter_vsFront_stopPosition = PublishTopicItem("vsController/vsFront/setConfig/stopPosition")
         self.set_vsCtrl_parameter_vsFront_sensorCropTop = PublishTopicItem("vsController/vsFront/setConfig/cropTop")
         self.set_vsCtrl_parameter_vsFront_sensorCropRight = PublishTopicItem("vsController/vsFront/setConfig/cropRight")
         self.set_vsCtrl_parameter_vsFront_sensorCropLeft = PublishTopicItem("vsController/vsFront/setConfig/cropLeft")
         self.set_vsCtrl_parameter_vsFront_sensorCropBottom = PublishTopicItem("vsController/vsFront/setConfig/cropBottom")
 
+        self.set_vsCtrl_vsRear_enableLiveView = PublishTopicItem("vsController/vsRear/enableLiveView")
+        self.set_vsCtrl_vsRear_focusCamera = PublishTopicItem("vsController/vsRear/focusCamera")
         self.set_vsCtrl_parameter_vsRear_stopPosition = PublishTopicItem("vsController/vsRear/setConfig/stopPosition")
         self.set_vsCtrl_parameter_vsRear_sensorCropTop = PublishTopicItem("vsController/vsRear/setConfig/cropTop")
         self.set_vsCtrl_parameter_vsRear_sensorCropRight = PublishTopicItem("vsController/vsRear/setConfig/cropRight")
@@ -177,12 +183,19 @@ class SubscribeTopics:
 
         # VisionSensorController (vsCtrl)
         self.get_vsCtrl_heartbeat = SubscribeTopicItem("vsController/heartbeat")
+        self.set_vsCtrl_vsController_sensorVersion = SubscribeTopicItem("vsController/sensorVersion")
         self.get_vsCtrl_filmTypeIsNegative = SubscribeTopicItem("vsController/getFilmTypeIsNegative")
         self.get_vsCtrl_general_pictureIsInPosition = SubscribeTopicItem("vsController/pictureIsInPosition")
+        self.get_vsCtrl_low_contrast_mode_enabled = SubscribeTopicItem("vsController/lcmEnabled")
         self.get_vsCtrl_parameter_sensorExposureTime = SubscribeTopicItem("vsController/getConfig/sensorExposureTime")
+        self.get_vsCtrl_centerImage = SubscribeTopicItem("vsController/getConfig/centerImage")
 
         self.get_vsCtrl_vsFront_pictureIsInPosition = SubscribeTopicItem("vsController/vsFront/pictureIsInPosition")
         self.get_vsCtrl_vsFront_edgePosition = SubscribeTopicItem("vsController/vsFront/edgePosition")
+        self.get_vsCtrl_vsFront_liveViewIsEnabled = SubscribeTopicItem("vsController/vsFront/liveViewIsEnabled")
+        self.get_vsCtrl_vsFront_fps = SubscribeTopicItem("vsController/vsFront/fps")
+        self.get_vsCtrl_vsFront_slope_tile1 = SubscribeTopicItem("vsController/vsFront/slope_tile1")
+        self.get_vsCtrl_vsFront_slope_tile2 = SubscribeTopicItem("vsController/vsFront/slope_tile2")
         self.get_vsCtrl_vsFront_imageData = SubscribeTopicItem("vsController/vsFront/imageData")
         self.get_vsCtrl_vsFront_imageDataTn = SubscribeTopicItem("vsController/vsFront/imageDataTn")
         self.get_vsCtrl_vsFront_getImageWidth = SubscribeTopicItem("vsController/vsFront/getConfig/imageWidth")
@@ -192,9 +205,14 @@ class SubscribeTopics:
         self.get_vsCtrl_vsFront_parameter_sensorCropLeft = SubscribeTopicItem("vsController/vsFront/getConfig/cropLeft")
         self.get_vsCtrl_vsFront_parameter_sensorCropBottom = SubscribeTopicItem("vsController/vsFront/getConfig/cropBottom")
         self.get_vsCtrl_vsFront_parameter_stopPosition = SubscribeTopicItem("vsController/vsFront/getConfig/stopPosition")
+        self.get_vsCtrl_vsFront_liveViewIsEnabled = SubscribeTopicItem("vsController/vsFront/liveViewIsEnabled")
 
         self.get_vsCtrl_vsRear_pictureIsInPosition = SubscribeTopicItem("vsController/vsRear/pictureIsInPosition")
         self.get_vsCtrl_vsRear_edgePosition = SubscribeTopicItem("vsController/vsRear/edgePosition")
+        self.get_vsCtrl_vsRear_liveViewIsEnabled = SubscribeTopicItem("vsController/vsRear/liveViewIsEnabled")
+        self.get_vsCtrl_vsRear_fps = SubscribeTopicItem("vsController/vsRear/fps")
+        self.get_vsCtrl_vsRear_slope_tile1 = SubscribeTopicItem("vsController/vsRear/slope_tile1")
+        self.get_vsCtrl_vsRear_slope_tile2 = SubscribeTopicItem("vsController/vsRear/slope_tile2")
         self.get_vsCtrl_vsRear_imageData = SubscribeTopicItem("vsController/vsRear/imageData")
         self.get_vsCtrl_vsRear_imageDataTn = SubscribeTopicItem("vsController/vsRear/imageDataTn")
         self.get_vsCtrl_vsRear_getImageWidth = SubscribeTopicItem("vsController/vsRear/getConfig/imageWidth")
@@ -221,11 +239,35 @@ class SubscribeTopics:
 class VsControllerPublishTopics:
     def __init__(self):
         self.set_vsController_heartbeat = PublishTopicItem("vsController/heartbeat")
+        self.set_vsCtrl_vsController_sensorVersion = PublishTopicItem("vsController/sensorVersion")
         self.set_vsFront_imageData = PublishTopicItem("vsController/vsFront/imageData", qos=0)
         self.set_vsRear_imageData = PublishTopicItem("vsController/vsRear/imageData", qos=0)
 
+        self.set_vsFront_getExposureTimeLive = PublishTopicItem("vsController/vsFront/sensorExposureTime", qos=0)
+        self.set_vsRear_getExposureTimeLive = PublishTopicItem("vsController/vsRear/sensorExposureTime", qos=0)
+
+        self.set_vsCtrl_low_contrast_mode_enabled = PublishTopicItem("vsController/lcmEnabled")
+
+        self.set_vsCtrl_filmTypeIsNegative = PublishTopicItem("vsController/getFilmTypeIsNegative")
+        self.set_vsCtrl_centerImage = PublishTopicItem("vsController/getConfig/centerImage")
+
+        self.get_vsCtrl_vsFront_slope_tile1 = PublishTopicItem("vsController/vsFront/slope_tile1")
+        self.get_vsCtrl_vsFront_slope_tile2 = PublishTopicItem("vsController/vsFront/slope_tile2")
+
+        self.get_vsCtrl_vsRear_slope_tile1 = PublishTopicItem("vsController/vsRear/slope_tile1")
+        self.get_vsCtrl_vsRear_slope_tile2 = PublishTopicItem("vsController/vsRear/slope_tile2")
+
+        self.get_vsCtrl_vsFront_pip_debug = PublishTopicItem("vsController/vsFront/pip_debug")
+        self.get_vsCtrl_vsRear_pip_debug = PublishTopicItem("vsController/vsRear/pip_debug")
+
         self.set_vsFront_imageDataTn = PublishTopicItem("vsController/vsFront/imageDataTn", qos=0)
         self.set_vsRear_imageDataTn = PublishTopicItem("vsController/vsRear/imageDataTn", qos=0)
+
+        self.get_vsFront_liveViewIsEnabled = PublishTopicItem("vsController/vsFront/liveViewIsEnabled")
+        self.get_vsRear_liveViewIsEnabled = PublishTopicItem("vsController/vsRear/liveViewIsEnabled")
+
+        self.get_vsCtrl_vsFront_fps = PublishTopicItem("vsController/vsFront/fps")
+        self.get_vsCtrl_vsRear_fps = PublishTopicItem("vsController/vsRear/fps")
 
         self.set_pictureIsInPosition = PublishTopicItem("vsController/pictureIsInPosition")
         self.set_vsFront_pictureIsInPosition = PublishTopicItem("vsController/vsFront/pictureIsInPosition")
@@ -236,6 +278,11 @@ class VsControllerPublishTopics:
 
         self.set_vsFront_edgePosition = PublishTopicItem("vsController/vsFront/edgePosition", qos=0)
         self.set_vsRear_edgePosition = PublishTopicItem("vsController/vsRear/edgePosition", qos=0)
+
+        self.set_vsFront_edgePosition_tile1 = PublishTopicItem("vsController/vsFront/edgePosition_tile1", qos=0)
+        self.set_vsFront_edgePosition_tile2 = PublishTopicItem("vsController/vsFront/edgePosition_tile2", qos=0)
+        self.set_vsRear_edgePosition_tile1 = PublishTopicItem("vsController/vsRear/edgePosition_tile1", qos=0)
+        self.set_vsRear_edgePosition_tile2 = PublishTopicItem("vsController/vsRear/edgePosition_tile2", qos=0)
 
         self.set_vsFront_getImageWidth = PublishTopicItem("vsController/vsFront/getConfig/imageWidth")
         self.set_vsFront_getImageHeight = PublishTopicItem("vsController/vsFront/getConfig/imageHeight")
@@ -258,10 +305,22 @@ class VsControllerPublishTopics:
 
 class VsControllerSubscribeTopics:
     def __init__(self):
+        self.get_fmCtrl_filmMoveDirection = SubscribeTopicItem("filmMoveController/curFilmMoveDirection")
+
+        self.get_vsCtrl_enable_low_contrast_mode = SubscribeTopicItem("vsController/enable_lcm")
+
+        self.get_vsCtrl_swapSensors = SubscribeTopicItem("vsController/swapSensors")
+        self.get_vsCtrl_centerImage = SubscribeTopicItem("vsController/setConfig/centerImage")
+
         self.get_vsFront_initSensor = SubscribeTopicItem("vsController/vsFront/initSensor")
         self.get_vsRear_initSensor = SubscribeTopicItem("vsController/vsRear/initSensor")
         self.get_setFilmTypeIsNegative = SubscribeTopicItem("vsController/setFilmTypeIsNegative")
         self.get_setExposureTime = SubscribeTopicItem("vsController/setConfig/sensorExposureTime")
+        self.get_vsCtrl_vsFront_enableLiveView = SubscribeTopicItem("vsController/vsFront/enableLiveView")
+        self.get_vsCtrl_vsRear_enableLiveView = SubscribeTopicItem("vsController/vsRear/enableLiveView")
+
+        self.get_vsCtrl_vsFront_focusCamera = SubscribeTopicItem("vsController/vsFront/focusCamera")
+        self.get_vsCtrl_vsRear_focusCamera = SubscribeTopicItem("vsController/vsRear/focusCamera")
 
         self.get_vsFront_setCropTop = SubscribeTopicItem("vsController/vsFront/setConfig/cropTop")
         self.get_vsFront_setCropRight = SubscribeTopicItem("vsController/vsFront/setConfig/cropRight")
@@ -310,8 +369,8 @@ class MqttHandler(threading.Thread):
             if item.enabled:
                 client.subscribe(item.address)
                 self._logInfoMqtt("subscribe to topic: " + item.address)
-        if self.client_type == "afController":
-            for key, item in self.sTopics_AfController.__dict__.items():
+        if self.client_type == "vsController":
+            for key, item in self.sTopics_vsController.__dict__.items():
                 if item.enabled:
                     client.subscribe(item.address)
                     self._logInfoMqtt("subscribe to topic: " + item.address)
@@ -335,8 +394,8 @@ class MqttHandler(threading.Thread):
                     if item.log_output:
                         self._logInfoMqttReceiveMessage(msg.topic, cur_message)
 
-        if self.client_type == "afController":
-            for key, item in self.sTopics_AfController.__dict__.items():
+        if self.client_type == "vsController":
+            for key, item in self.sTopics_vsController.__dict__.items():
                 if item.enabled:
                     if msg.topic == item.address:
                         item.value = cur_message
@@ -391,28 +450,35 @@ class MqttHandler(threading.Thread):
         self.client_type = client_type
         self.pTopics = PublishTopics()
         self.sTopics = SubscribeTopics()
-        self.pTopics_AfController = VsControllerPublishTopics()
-        self.sTopics_AfController = VsControllerSubscribeTopics()
         if self.client_type == "vsController":
-            self.sTopics.get_vsFront_edgePosition.enabled = False
-            self.sTopics.get_vsRear_edgePosition.enabled = False
-            self.sTopics.get_general_pictureIsInPosition.enabled = False
-            self.sTopics.get_vsFront_pictureIsInPosition.enabled = False
-            self.sTopics.get_vsRear_pictureIsInPosition.enabled = False
-            self.sTopics.get_vsFront_imageData.enabled = False
-            self.sTopics.get_vsRear_imageData.enabled = False
-            self.sTopics.get_vsFront_imageDataTn.enabled = False
-            self.sTopics.get_vsRear_imageDataTn.enabled = False
-            self.sTopics.get_vsController_heartbeat.enabled = False
-            self.sTopics.get_filmPosition.enabled = False
-            self.sTopics.get_picToPicTime.enabled = False
-            self.sTopics.get_mainController_heartbeat.enabled = False
-            self.sTopics.get_filmMoveController_heartbeat.enabled = False
-            self.sTopics.get_spoolDiameterFront.enabled = False
-            self.sTopics.get_spoolDiameterRear.enabled = False
-            self.sTopics.get_spoolTorqueFront.enabled = False
-            self.sTopics.get_spoolTorqueRear.enabled = False
-            self.sTopics.get_picToPicDistance.enabled = False
+            self.pTopics_vsController = VsControllerPublishTopics()
+            self.sTopics_vsController = VsControllerSubscribeTopics()
+            self.sTopics.get_vsCtrl_low_contrast_mode_enabled.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_edgePosition.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_edgePosition.enabled = False
+            self.sTopics.get_vsCtrl_general_pictureIsInPosition.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_pictureIsInPosition.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_pictureIsInPosition.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_imageData.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_imageData.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_imageDataTn.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_imageDataTn.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_liveViewIsEnabled.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_liveViewIsEnabled.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_liveViewIsEnabled.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_liveViewIsEnabled.enabled = False
+            self.sTopics.get_vsCtrl_vsFront_fps.enabled = False
+            self.sTopics.get_vsCtrl_vsRear_fps.enabled = False
+            self.sTopics.get_vsCtrl_heartbeat.enabled = False
+            self.sTopics.get_fmCtrl_filmPosition.enabled = False
+            self.sTopics.get_fmCtrl_picToPicTime.enabled = False
+            self.sTopics.get_mCtrl_heartbeat.enabled = False
+            self.sTopics.get_fmCtrl_heartbeat.enabled = False
+            self.sTopics.get_fmCtrl_spoolDiameterFront.enabled = False
+            self.sTopics.get_fmCtrl_spoolDiameterRear.enabled = False
+            self.sTopics.get_fmCtrl_spoolTorqueFront.enabled = False
+            self.sTopics.get_fmCtrl_spoolTorqueRear.enabled = False
+            self.sTopics.get_fmCtrl_picToPicDistance.enabled = False
 
         self._client_mqtt = mqtt.Client(client_id=client_id)
         self._client_mqtt.message_retry_set(0.1)

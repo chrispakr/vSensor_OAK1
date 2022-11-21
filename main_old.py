@@ -34,7 +34,7 @@ fps_edge1_sensor_rear = 0
 fps_edge2_sensor_rear = 0
 fps_preview_sensor_rear = 0
 
-# edge_detection_slope = 35
+# edge_detection_slope_std = 35
 edge_detection_slope = 15
 
 

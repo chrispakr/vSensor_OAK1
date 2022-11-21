@@ -224,6 +224,7 @@ class VisionSensor(ValueHandler):
 
         # Define sources and outputs
         self.camRgb = self.pipeline.create(dai.node.ColorCamera)
+        self.crop_isp_image = self.pipeline.create((dai.node.ImageManip))
         self.videoEnc = self.pipeline.create(dai.node.VideoEncoder)
         self.tile1_crop = self.pipeline.create(dai.node.ImageManip)
         self.tile2_crop = self.pipeline.create(dai.node.ImageManip)
@@ -257,12 +258,16 @@ class VisionSensor(ValueHandler):
         self.camRgb.setInterleaved(False)
         maxFrameSize = self.camRgb.getPreviewWidth() * self.camRgb.getPreviewHeight() * 3
 
+        self.crop_isp_image.initialConfig.setCropRect(0.15, 0, 0.85, 0.5)
+        # self.crop_isp_image.setResizeThumbnail(800, 600)
+        # self.crop_isp_image.initialConfig.setFrameType(dai.RawImgFrame.Type.GRAY8)
+
         self.tile1_crop.initialConfig.setCropRect(0, 0, 0.5, (self.stop_position_max + 20) / preview_height)
-        self.tile1_crop.setMaxOutputFrameSize(maxFrameSize)
+        # self.tile1_crop.setMaxOutputFrameSize(maxFrameSize)
         self.tile1_crop.initialConfig.setFrameType(dai.RawImgFrame.Type.GRAY8)
 
         self.tile2_crop.initialConfig.setCropRect(0.5, 0, 1, (self.stop_position_max + 20) / preview_height)
-        self.tile2_crop.setMaxOutputFrameSize(maxFrameSize)
+        # self.tile2_crop.setMaxOutputFrameSize(maxFrameSize)
         self.tile2_crop.initialConfig.setFrameType(dai.RawImgFrame.Type.GRAY8)
 
         # self.full_crop.initialConfig.setCropRect(0.1, 0, 1, preview_height_crop_factor)
@@ -283,9 +288,12 @@ class VisionSensor(ValueHandler):
         self.videoEnc.setDefaultProfilePreset(30, dai.VideoEncoderProperties.Profile.MJPEG)
 
         # Links
-        self.camRgb.preview.link(self.tile1_crop.inputImage)
-        self.camRgb.preview.link(self.tile2_crop.inputImage)
+        self.camRgb.isp.link(self.crop_isp_image.inputImage)
+        # self.camRgb.isp.link(self.tile2_crop.inputImage)
         self.camRgb.preview.link(self.reduce_frame.inputs['input'])
+
+        self.crop_isp_image.preview.link(self.tile1_crop.inputImage)
+        self.crop_isp_image.preview.link(self.tile2_crop.inputImage)
 
         self.tile1_crop.out.link(self.x_out_image1.input)
         self.tile2_crop.out.link(self.x_out_image2.input)
@@ -364,7 +372,7 @@ class VisionSensor(ValueHandler):
                 self.fps_video = self._fps_counter_video // 10
                 self.fps_video_time = datetime.now()
                 self._fps_counter_video = 0
-                # logInfoGeneral("video-FPS: {}".format(str(self.fps_video)))
+                # logInfoGeneral("video-FPS: {}".format(str(self.fps_jpg_image)))
             return True
         return False
 
