@@ -32,8 +32,10 @@ edge_detection_slope_lcm = 15
 edge_detection_slope_std = 25
 max_edge_position_diff = 10
 
-config_file_init = "config/init.ini"
-write_config = False
+init_config_file = "config/init.ini"
+settings_config_file = "config/settings.ini"
+write_init_config = False
+write_settings_config = False
 
 vs_front_config_name = "vs_front"
 vs_rear_config_name = "vs_rear"
@@ -42,6 +44,9 @@ line_color_red = (0, 0, 255)
 line_color_green = (0, 255, 0)
 line_color_orange = (0, 165, 255)
 line_color_blue = (255, 0, 0)
+
+capture_width = 860
+capture_height = 600
 
 preview_width = 800
 preview_height = 600
@@ -71,8 +76,6 @@ enable_live_view = False
 reset_program = False
 
 last_slope_value = 0
-
-
 
 mqtt_report_position_steps = 5
 
@@ -108,19 +111,6 @@ vs_enable_low_contrast_mode = ValueHandler(False)
 film_move_direction = ValueHandler(0)
 
 send_thumbnail = ValueHandler(False)
-
-s_half_frame_rate = """
-    divide = 5
-    curFrame = 0
-    while True:
-        frame = node.io['input'].get()
-        if curFrame == 0:
-            node.io['out'].send(frame)
-        else:
-            if curFrame == (divide - 1):
-                curFrame = -1    
-        curFrame += 1
-    """
 
 logging.basicConfig(
     level=logging.INFO,
@@ -175,27 +165,31 @@ class VisionSensor(ValueHandler):
         self.edge_position_tile_diff = 0
         self.edge_detected = ValueHandler(False)
         self.edge_is_in_position = ValueHandler(False)
-
+        self.image_center_position = 450
+        self.proc_image_width = 400
 
         # processing image variables
-        self.proc_image_edge_data = None
-        self.proc_image_edge = None
-        self.proc_image_edge_cropped = None
+        self.input_image_data = None
+        self.input_image = None
+        self.proc_image_left = None
+        self.proc_image_right = None
+        self.np_image_info_edge_line = None
+        self.np_image_info_setup_lines = None
+        self.proc_image_centered = None
         self.crop_image_right = 50
         self.crop_image_left = 50
+
 
         self.edge_position_tile = []
         self.edge_slope_tile = []
         self.edge_result_tile = []
         self.image_tile = []
-        self.image_info_tile = []
         self.chart_slope_tile = []
         for i in range(self.number_of_tiles):
             self.edge_position_tile.append(ValueHandler(-1))
             self.edge_slope_tile.append(0)
             self.edge_result_tile.append(None)
             self.image_tile.append(None)
-            self.image_info_tile.append(None)
             self.chart_slope_tile.append(deque(maxlen=self.chart_length))
             self.chart_slope_tile[i].append(0)
 
@@ -212,11 +206,11 @@ class VisionSensor(ValueHandler):
         self.jpg_video_base64 = None
 
         # fps variables
-        self.fps_proc_image_time = datetime.now()
+        self.fps_elapsed_time = datetime.now()
         self.fps_jpg_image_time = datetime.now()
-        self.fps_proc_image = 0
+        self.fps = 0
         self.fps_jpg_image = 0
-        self._fps_counter_proc_image = 0
+        self._fps_counter = 0
         self._fps_counter_jpg_image = 0
 
         # camera control variables
@@ -232,7 +226,6 @@ class VisionSensor(ValueHandler):
         self.getPipeline()
         self.device = dai.Device(self.pipeline, self.device_info)
         self.image_edge_queue = self.device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
-        self.video_queue = self.device.getOutputQueue(name="video", maxSize=30, blocking=True)
         self.camera_control_queue = self.device.getInputQueue('control')
 
         if enable_chart:
@@ -258,24 +251,16 @@ class VisionSensor(ValueHandler):
         self.jpgEncoder = self.pipeline.create(dai.node.VideoEncoder)
         self.manip_edge_detetction = self.pipeline.create(dai.node.ImageManip)
         self.full_crop = self.pipeline.create(dai.node.ImageManip)
-        self.reduce_frame = self.pipeline.create(dai.node.Script)
-        self.reduce_frame.setScript(s_half_frame_rate)
-        self.reduce_frame.inputs['image'].setBlocking(True)
-        self.reduce_frame.inputs['image'].setQueueSize(1)
-        self.full_rotate = self.pipeline.create(dai.node.ImageManip)
         self.x_out_edge_detection = self.pipeline.create(dai.node.XLinkOut)
-        # self.x_out_image2 = self.pipeline.create(dai.node.XLinkOut)
-        self.x_out_video = self.pipeline.create(dai.node.XLinkOut)
 
         self.controlIn = self.pipeline.create(dai.node.XLinkIn)
 
         self.x_out_edge_detection.setStreamName('image_edge_detection')
-        self.x_out_video.setStreamName('video')
         self.controlIn.setStreamName('control')
 
         # Properties
         self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-        self.camRgb.setPreviewSize(preview_width, preview_height)
+        self.camRgb.setPreviewSize(capture_width, capture_height)
         self.camRgb.setFps(camera_fps)
         self.camRgb.initialControl.setAutoFocusLensRange(120, 180)
         self.camRgb.initialControl.setManualFocus(int(config_init.get(self.name, "lens_position")))
@@ -287,42 +272,31 @@ class VisionSensor(ValueHandler):
         self.manip_edge_detetction.setMaxOutputFrameSize(maxFrameSize)
         self.manip_edge_detetction.initialConfig.setFrameType(dai.RawImgFrame.Type.GRAY8)
 
-        self.rr = dai.RotatedRect()
-        self.rr.center.x, self.rr.center.y = preview_width // 2, preview_height_crop // 2
-        self.rr.size.width, self.rr.size.height = preview_height_crop, preview_width
-        if self.is_front_sensor:
-            self.rr.angle = 90
-        else:
-            self.rr.angle = 270
-        self.full_rotate.initialConfig.setCropRotatedRect(self.rr, False)
-        self.full_rotate.initialConfig.setFrameType(dai.RawImgFrame.Type.NV12)
-
-        self.jpgEncoder.setDefaultProfilePreset(30, dai.VideoEncoderProperties.Profile.MJPEG)
-
         # Links
         self.camRgb.preview.link(self.manip_edge_detetction.inputImage)
-        self.camRgb.preview.link(self.reduce_frame.inputs['input'])
 
         self.manip_edge_detetction.out.link(self.x_out_edge_detection.input)
 
-        self.reduce_frame.outputs['out'].link(self.full_rotate.inputImage)
-        self.full_rotate.out.link(self.jpgEncoder.input)
-
-        self.jpgEncoder.bitstream.link(self.x_out_video.input)
-
         self.controlIn.out.link(self.camRgb.inputControl)
 
-    def calculate_edge_parameter(self, tile_id):
+    def process_image(self, tile_id):
         self.image_tile.clear()
-        self.proc_image_edge_data = self.image_edge_queue.tryGet()
-        if self.proc_image_edge_data is not None:
-            self.proc_image_edge = self.proc_image_edge_data.getCvFrame()
-            (full_image_height, full_image_width) = self.proc_image_edge.shape[:2]
-            self.proc_image_edge_cropped = self.proc_image_edge[0:full_image_height, self.crop_image_right:full_image_width - self.crop_image_left]
-            (crop_image_height, crop_image_width) = self.proc_image_edge_cropped.shape[:2]
-            tile_width = int(crop_image_width // self.number_of_tiles)
+        self.input_image_data = self.image_edge_queue.tryGet()
+        if self.input_image_data is not None:
+            self.input_image = self.input_image_data.getCvFrame()
+            (full_image_height, full_image_width) = self.input_image.shape[:2]
+            if self.image_center_position < preview_width // 2:
+                self.image_center_position = capture_width // 2
+            self.proc_image_centered = self.input_image[0:full_image_height, self.image_center_position - (preview_width // 2):self.image_center_position + (preview_width // 2)]
+            self.proc_image_left = self.proc_image_centered[0:full_image_height, self.image_center_position - self.proc_image_width:self.image_center_position]
+            self.proc_image_right = self.proc_image_centered[0:full_image_height, self.image_center_position:self.image_center_position + self.proc_image_width]
+            (left_image_height, left_image_width) = self.proc_image_left.shape[:2]
+            (right_image_height, right_image_width) = self.proc_image_right.shape[:2]
+            tile_width = int(left_image_width // (self.number_of_tiles // 2))
+
+
             for i in range(self.number_of_tiles):
-                self.image_tile.append(self.proc_image_edge_cropped[0:full_image_height, (i * tile_width):(i * tile_width) + tile_width])
+                self.image_tile.append(self.proc_image_left[0:full_image_height, (i * tile_width):(i * tile_width) + tile_width])
 
                 self.edge_result_tile[i] = self.calc_edge_parameter(self.image_tile[i])
                 # print(str(int(self.edge_result_tile[i][1])) + " // " + str(int(self.edge_result_tile[i][0])))
@@ -335,15 +309,15 @@ class VisionSensor(ValueHandler):
                     self.edge_position_tile[i] = self.edge_result_tile[i][2]
                     self.edge_slope_tile[i] = int(self.edge_result_tile[i][0])
 
-            self._fps_counter_proc_image += 1
-            if (datetime.now() - self.fps_proc_image_time).seconds >= 10:
-                self.fps_proc_image = self._fps_counter_proc_image // 10
-                self.fps_proc_image_time = datetime.now()
-                self._fps_counter_proc_image = 0
-            if int(self.proc_image_edge_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
-                self.exposure_time.value = int(self.proc_image_edge_data.getExposureTime().total_seconds() * 1000000)
-            if self.proc_image_edge_data.getLensPosition() != self.lens_position:
-                self.lens_position = self.proc_image_edge_data.getLensPosition()
+            self._fps_counter += 1
+            if (datetime.now() - self.fps_elapsed_time).seconds >= 10:
+                self.fps = self._fps_counter // 10
+                self.fps_elapsed_time = datetime.now()
+                self._fps_counter = 0
+            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
+                self.exposure_time.value = int(self.input_image_data.getExposureTime().total_seconds() * 1000000)
+            if self.input_image_data.getLensPosition() != self.lens_position:
+                self.lens_position = self.input_image_data.getLensPosition()
                 self.log_info_vSensor("lens-position changed to: {}".format(self.lens_position))
             if self.autoFocusEnabled:
                 if (datetime.now() - self.af_start_time).seconds > 2:
@@ -351,7 +325,7 @@ class VisionSensor(ValueHandler):
                     self.setFocusValue(self.lens_position)
                     self.log_info_vSensor("disable AutoFocus")
                     config_init.set(self.name, "lens_position", str(self.lens_position))
-                    writeInitConfig()
+                    writeInitConfigToFile()
             self.calc_edge_position()
             return True
         else:
@@ -414,38 +388,23 @@ class VisionSensor(ValueHandler):
                 # line_slope_tile2.set_data(self.chart_x_image_nr, self.chart_slope_tile[1])
                 # line_slope_tile1.set_data(self.chart_x_image_nr, self.chart_slope_tile[0])
 
-    def check_video(self):
-        self.jpg_image_data = self.video_queue.tryGet()
-        if self.jpg_image_data is not None:
-            self.jpg_image = self.jpg_image_data.getData()
-            self.jpg_video_base64 = base64.b64encode(self.jpg_image)
-            self._fps_counter_jpg_image += 1
-            if (datetime.now() - self.fps_jpg_image_time).seconds >= 10:
-                self.fps_jpg_image = self._fps_counter_jpg_image // 10
-                self.fps_jpg_image_time = datetime.now()
-                self._fps_counter_jpg_image = 0
-                # logInfoGeneral("video-FPS: {}".format(str(self.fps_jpg_image)))
-            return True
-        return False
-
-    def create_image_info_tile(self):
-        if self.proc_image_edge is not None:
-            self.image_info_tile = cv2.cvtColor(self.proc_image_edge, cv2.COLOR_GRAY2RGB)
-            img_height, img_width, dim = self.image_info_tile.shape
-            cv2.line(self.image_info_tile, (self.crop_image_left, 0), (self.crop_image_left, img_height), line_color_blue, 1)
-            cv2.line(self.image_info_tile, (img_width - self.crop_image_right, 0), (img_width - self.crop_image_right, img_height), line_color_blue, 1)
-            center_image_line = ((img_width - self.crop_image_right - self.crop_image_left) // 2) + self.crop_image_left
-            cv2.line(self.image_info_tile, (center_image_line, 0), (center_image_line, img_height), line_color_red, 1)
+    def create_image_info(self):
+        if self.proc_image_centered is not None:
+            self.np_image_info_edge_line = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
+            img_height, img_width, dim = self.np_image_info_edge_line.shape
             if self.edge_is_in_position.value:
                 line_color = line_color_green
             else:
                 line_color = line_color_orange
-            cv2.line(self.image_info_tile, (0, self.edge_position.value), (img_width, self.edge_position.value), line_color, 2)
+            cv2.line(self.np_image_info_edge_line, (0, self.edge_position.value), (img_width, self.edge_position.value), line_color, 2)
+            self.np_image_info_setup_lines = self.np_image_info_edge_line
+            cv2.line(self.np_image_info_setup_lines, (self.crop_image_left, 0), (self.crop_image_left, img_height), line_color_blue, 1)
+            cv2.line(self.np_image_info_setup_lines, (img_width - self.crop_image_right, 0), (img_width - self.crop_image_right, img_height), line_color_blue, 1)
+            center_image_line = ((img_width - self.crop_image_right - self.crop_image_left) // 2) + self.crop_image_left
+            cv2.line(self.np_image_info_setup_lines, (center_image_line, 0), (center_image_line, img_height), line_color_red, 1)
 
-    def create_image_info_fullsize(self, create_thumbnail):
-
-        self.image_jpg_info = jpeg.decode(self.jpg_image)
-        img_height, img_width, dim = self.image_jpg_info.shape
+    def create_thumbnail(self):
+        img_height, img_width, dim = self.np_image_info_edge_line.shape
 
         if self.is_front_sensor:
             edge_position = self.edge_position.value
@@ -459,12 +418,11 @@ class VisionSensor(ValueHandler):
 
         cv2.line(self.image_jpg_info, (edge_position, 0), (edge_position, img_height), line_color, 2)
 
-        if create_thumbnail:
-            tn_width = int(self.image_jpg_info.shape[1] * self.tn_scale_percent / 100)
-            tn_height = int(self.image_jpg_info.shape[0] * self.tn_scale_percent / 100)
-            self.image_info_tn = cv2.resize(self.image_jpg_info, (tn_width, tn_height))
-            self.jpg_info_tn = jpeg.encode(self.image_info_tn, quality=80)
-            self.jpg_info_tn_base64 = base64.b64encode(self.jpg_info_tn)
+        tn_width = int(self.image_jpg_info.shape[1] * self.tn_scale_percent / 100)
+        tn_height = int(self.image_jpg_info.shape[0] * self.tn_scale_percent / 100)
+        self.image_info_tn = cv2.resize(self.image_jpg_info, (tn_width, tn_height))
+        self.jpg_info_tn = jpeg.encode(self.image_info_tn, quality=80)
+        self.jpg_info_tn_base64 = base64.b64encode(self.jpg_info_tn)
 
     def autoFocusCamera(self):
         self.log_info_vSensor("Focus Camera...")
@@ -509,13 +467,21 @@ class VisionSensor(ValueHandler):
 # Read Init-Configuration
 logInfoGeneral("read init-config file..")
 config_init = ConfigParser()
-config_init.read(config_file_init)
+config_settings = ConfigParser()
+config_init.read(init_config_file)
+config_settings.read(settings_config_file)
 
 
-def writeInitConfig():
+def writeInitConfigToFile():
     logInfoGeneral("write init-config file..")
-    with open(config_file_init, 'w') as configfile:
+    with open(init_config_file, 'w') as configfile:
         config_init.write(configfile)
+
+
+def writeSettingsConfigToFile():
+    logInfoGeneral("write sensor-config file..")
+    with open(settings_config_file, 'w') as configfile:
+        config_settings.write(configfile)
 
 
 if config_init.get("vs_front", "serial") == "":
@@ -538,7 +504,7 @@ if not found_front_sensor or not found_rear_sensor:
     if len(device) == 2:
         config_init.set(vs_front_config_name, "serial", device[0].getMxId())
         config_init.set(vs_rear_config_name, "serial", device[1].getMxId())
-        writeInitConfig()
+        writeInitConfigToFile()
 
     found_front_sensor, device_info_front_sensor = dai.Device.getDeviceByMxId(config_init.get(vs_front_config_name, "serial"))
     found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceByMxId(config_init.get(vs_rear_config_name, "serial"))
@@ -565,14 +531,24 @@ def mqtt_heartbeat():
 
 @tl.job(interval=timedelta(seconds=10))
 def get_fps():
-    mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsCtrl_vsFront_fps, vs_front.fps_proc_image)
-    mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsCtrl_vsRear_fps, vs_rear.fps_proc_image)
+    mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsCtrl_vsFront_fps, vs_front.fps)
+    mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsCtrl_vsRear_fps, vs_rear.fps)
 
 
 tl.start()
 
 vs_front = VisionSensor(device_info_front_sensor, True, vs_front_config_name)
 vs_rear = VisionSensor(device_info_rear_sensor, False, vs_rear_config_name)
+
+if config_settings.has_option(vs_front_config_name, "center_position"):
+    vs_front.image_center_position = config_settings.getint(vs_front_config_name, "center_position")
+if config_settings.has_option(vs_rear_config_name, "center_position"):
+    vs_rear.image_center_position = config_settings.getint(vs_rear_config_name, "center_position")
+
+if config_settings.has_option(vs_front_config_name, "proc_image_width"):
+    vs_front.proc_image_width = config_settings.getint(vs_front_config_name, "proc_image_width")
+if config_settings.has_option(vs_rear_config_name, "proc_image_width"):
+    vs_rear.proc_image_width = config_settings.getint(vs_rear_config_name, "proc_image_width")
 
 vs_front.enable_lcm = vs_enable_low_contrast_mode.value
 vs_rear.enable_lcm = vs_enable_low_contrast_mode.value
@@ -638,7 +614,7 @@ with contextlib.ExitStack() as stack:
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_swapSensors):
             config_init.set(vs_front_config_name, "serial", config_init.get(vs_rear_config_name, "serial"))
             config_init.set(vs_rear_config_name, "serial", config_init.get(vs_front_config_name, "serial"))
-            write_config = True
+            write_init_config = True
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_enable_low_contrast_mode):
             if ef.str2bool(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_enable_low_contrast_mode)):
@@ -649,66 +625,70 @@ with contextlib.ExitStack() as stack:
                 vs_front.enable_lcm = False
                 vs_rear.enable_lcm = False
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_low_contrast_mode_enabled, ef.bool2Str(False))
-            logInfoGeneral("set enable_lcm to: {}".format(vs_front.enable_lcm))
+            logInfoGeneral("set lcm_enabled to: {}".format(vs_front.enable_lcm))
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_captureImage) or mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_captureImage):
             send_thumbnail.value = True
 
-        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setCropLeft):
-            vs_front.crop_image_left = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsFront_setCropLeft))
-            config_init.set(vs_front_config_name, "crop_left_position", str(vs_front.crop_image_left))
-            write_config = True
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setProcImageWidth):
+            vs_front.proc_image_width = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsFront_setProcImageWidth))
+            config_settings.set(vs_front_config_name, "proc_image_width", str(vs_front.proc_image_width))
+            write_settings_config = True
 
-        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setCropRight):
-            vs_front.crop_image_right = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsFront_setCropRight))
-            config_init.set(vs_front_config_name, "crop_right_position", str(vs_front.crop_image_right))
-            write_config = True
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setProcImageWidth):
+            vs_rear.proc_image_width = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setProcImageWidth))
+            config_settings.set(vs_rear_config_name, "proc_image_width", str(vs_rear.proc_image_width))
+            write_settings_config = True
 
-        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCropLeft):
-            vs_rear.crop_image_left = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setCropLeft))
-            config_init.set(vs_rear_config_name, "crop_left_position", str(vs_rear.crop_image_left))
-            write_config = True
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setCenterPosition):
+            vs_front.image_center_position = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsFront_setCenterPosition))
+            logInfoGeneral("set centerPosition to: {}".format(vs_front.image_center_position))
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getCenterPosition, vs_front.image_center_position)
+            config_settings.set(vs_front_config_name, "center_position", str(vs_front.image_center_position))
+            write_settings_config = True
 
-        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCropRight):
-            vs_rear.crop_image_right = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setCropRight))
-            config_init.set(vs_rear_config_name, "crop_right_position", str(vs_rear.crop_image_right))
-            write_config = True
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCenterPosition):
+            vs_rear.image_center_position = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setCenterPosition))
+            logInfoGeneral("set centerPosition to: {}".format(vs_front.image_center_position))
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getCenterPosition, vs_rear.image_center_position)
+            config_settings.set(vs_rear_config_name, "center_position", str(vs_rear.image_center_position))
+            write_settings_config = True
 
         # Process Front-Sensor
-        if vs_front.calculate_edge_parameter(0):
+        if vs_front.process_image(0):
             if showOutput:
-                vs_front.create_image_info_tile()
-                cv2.imshow("Sensor-Front - Processing", vs_front.image_info_tile)
+                vs_front.create_image_info()
+                cv2.imshow("Sensor-Front - Processing", vs_front.np_image_info_edge_line)
 
-        if vs_front.check_video():
-
-            if vs_front_enable_live_view.value:
-                vs_front.create_image_info_fullsize(True)
-                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageDataTn, vs_front.jpg_info_tn_base64)
-
-            if showOutput:
-                pass
+        # if vs_front.check_video():
+        #
+        #     if vs_front_enable_live_view.value:
+        #         vs_front.create_info_image(True)
+        #         mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageDataTn, vs_front.jpg_info_tn_base64)
+        #
+        #     if showOutput:
+        #         pass
 
         # Process Rear-Sensor
-        if vs_rear.calculate_edge_parameter(0):
+        if vs_rear.process_image(0):
             if showOutput:
-                vs_rear.create_image_info_tile()
-                cv2.imshow("Sensor-Rear - Processing", vs_rear.image_info_tile)
+                vs_rear.create_image_info()
+                cv2.imshow("Sensor-Rear - Processing", vs_rear.np_image_info_edge_line)
 
-        if vs_rear.check_video():
-            if vs_rear_enable_live_view.value:
-                vs_rear.create_image_info_fullsize(True)
-                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageDataTn, vs_rear.jpg_info_tn_base64)
-
-            if showOutput:
-
-                if vs_front.image_jpg_info is not None and vs_rear.image_jpg_info is not None:
-                    i0_complete = np.concatenate((vs_rear.image_jpg_info, vs_front.image_jpg_info), axis=1)
-                    cv2.imshow("Video / Sensor-Front", i0_complete)
-
-                if vs_front.image_info_tn is not None and vs_rear.image_info_tn is not None:
-                    i0_complete = np.concatenate((vs_rear.image_info_tn, vs_front.image_info_tn), axis=1)
-                    cv2.imshow("VideoTN / Sensor-Front", i0_complete)
+        # if vs_rear.check_video():
+        #     if vs_rear_enable_live_view.value:
+        #         vs_rear.create_info_image(True)
+        #         mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageDataTn, vs_rear.jpg_info_tn_base64)
+        #
+        #     if showOutput:
+        #
+        #         if vs_front.image_jpg_info is not None and vs_rear.image_jpg_info is not None:
+        #             i0_complete = np.concatenate((vs_rear.image_jpg_info, vs_front.image_jpg_info), axis=1)
+        #             cv2.imshow("Video / Sensor-Front", i0_complete)
+        #
+        #         if vs_front.image_info_tn is not None and vs_rear.image_info_tn is not None:
+        #             i0_complete = np.concatenate((vs_rear.image_info_tn, vs_front.image_info_tn), axis=1)
+        #             cv2.imshow("VideoTN / Sensor-Front", i0_complete)
 
         if vs_front.edge_position.is_different() or vs_rear.edge_position.is_different():
 
@@ -755,10 +735,10 @@ with contextlib.ExitStack() as stack:
                         # send_thumbnail = True
 
         if send_thumbnail.value:
-            vs_front.create_image_info_fullsize(True)
+            # vs_front.create_info_image(True)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageDataTn, vs_front.jpg_info_tn_base64)
             # mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, vs_front.jp)
-            vs_rear.create_image_info_fullsize(True)
+            # vs_rear.create_info_image(True)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageDataTn, vs_rear.jpg_info_tn_base64)
             if vs_front.exposure_time.is_different():
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getExposureTimeLive, vs_front.exposure_time.value)
@@ -788,9 +768,13 @@ with contextlib.ExitStack() as stack:
 
         # last_slope_value = vs_front.total_edge_slope.value
 
-        if write_config:
-            writeInitConfig()
-            write_config = False
+        if write_init_config:
+            writeInitConfigToFile()
+            write_init_config = False
+
+        if write_settings_config:
+            writeSettingsConfigToFile()
+            write_settings_config = False
 
         vs_front_enable_live_view.reset()
         vs_rear_enable_live_view.reset()

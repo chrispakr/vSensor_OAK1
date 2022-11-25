@@ -37,7 +37,7 @@ class SubscribeTopicItem:
     value = property(getValue, setValue)
 
 
-class PublishTopics:
+class GeneralPublishTopics:
     def __init__(self):
         # FilmMoveController (fmCtrl)
         self.set_fmCtrl_startInitFilm = PublishTopicItem("filmMoveController/filmStatus/startInitFilm")
@@ -49,14 +49,19 @@ class PublishTopics:
         self.set_fmCtrl_increaseTotalPicCounter = PublishTopicItem("filmMoveController/pictureCounter/totalPics/incPicCounter")
         self.set_fmCtrl_increaseBwPicCounter = PublishTopicItem("filmMoveController/pictureCounter/bw/incPicCounter")
         self.set_fmCtrl_increaseColorPicCounter = PublishTopicItem("filmMoveController/pictureCounter/color/incPicCounter")
-        self.set_fmCtrl_increaseRadiometricCalibrationPicCounter = PublishTopicItem("filmMoveController/pictureCounter/radiometricCalibration/incPicCounter")
-        self.set_fmCtrl_increaseGeometricCalibrationPicCounter = PublishTopicItem("filmMoveController/pictureCounter/geometricCalibration/incPicCounter")
+        self.set_fmCtrl_increaseRadiometricCalibrationPicCounter = PublishTopicItem(
+            "filmMoveController/pictureCounter/radiometricCalibration/incPicCounter")
+        self.set_fmCtrl_increaseGeometricCalibrationPicCounter = PublishTopicItem(
+            "filmMoveController/pictureCounter/geometricCalibration/incPicCounter")
 
-        self.set_fmCtrl_parameter_moveToPicture_distanceFast = PublishTopicItem("filmMoveController/setParameter/moveToPicture_distanceFast")
+        self.set_fmCtrl_parameter_moveToPicture_distanceFast = PublishTopicItem(
+            "filmMoveController/setParameter/moveToPicture_distanceFast")
         self.set_fmCtrl_parameter_moveToPicture_endVelocity = PublishTopicItem("filmMoveController/setParameter/moveToPicture_endVelocity")
-        self.set_fmCtrl_parameter_moveToPicture_fixedDistance = PublishTopicItem("filmMoveController/setParameter/moveToPicture_fixedDistance")
+        self.set_fmCtrl_parameter_moveToPicture_fixedDistance = PublishTopicItem(
+            "filmMoveController/setParameter/moveToPicture_fixedDistance")
         self.set_fmCtrl_parameter_moveFilm_velocity = PublishTopicItem("filmMoveController/setParameter/moveFilm_velocity")
-        self.set_fmCtrl_parameter_lockMotorsIfNoFilmIsLoaded = PublishTopicItem("filmMoveController/setParameter/lockMotorsIfNoFilmIsLoaded")
+        self.set_fmCtrl_parameter_lockMotorsIfNoFilmIsLoaded = PublishTopicItem(
+            "filmMoveController/setParameter/lockMotorsIfNoFilmIsLoaded")
         self.set_fmCtrl_parameter_autoUnloadFilm = PublishTopicItem("filmMoveController/setParameter/autoUnloadFilm")
         self.set_fmCtrl_parameter_vsSlowDownPosition = PublishTopicItem("filmMoveController/setParameter/vsSlowDownPosition")
         self.set_fmCtrl_enableFreeRun = PublishTopicItem("filmMoveController/enableFreeRun")
@@ -84,7 +89,7 @@ class PublishTopics:
         # VisionSensorController (vsCtrl)
         self.set_vsCtrl_filmTypeIsNegative = PublishTopicItem("vsController/setFilmTypeIsNegative")
         self.set_vsCtrl_parameter_sensorExposureTime = PublishTopicItem("vsController/setConfig/sensorExposureTime")
-        self.set_vsCtrl_enable_low_contrast_mode = PublishTopicItem("vsController/enable_lcm")
+        self.set_vsCtrl_enable_low_contrast_mode = PublishTopicItem("vsController/lcm_enabled")
         self.set_vsCtrl_centerImage = PublishTopicItem("vsController/setConfig/centerImage")
 
         self.set_vsCtrl_vsFront_enableLiveView = PublishTopicItem("vsController/vsFront/enableLiveView")
@@ -94,6 +99,8 @@ class PublishTopics:
         self.set_vsCtrl_parameter_vsFront_sensorCropRight = PublishTopicItem("vsController/vsFront/setConfig/cropRight")
         self.set_vsCtrl_parameter_vsFront_sensorCropLeft = PublishTopicItem("vsController/vsFront/setConfig/cropLeft")
         self.set_vsCtrl_parameter_vsFront_sensorCropBottom = PublishTopicItem("vsController/vsFront/setConfig/cropBottom")
+        self.get_vsCtrl_parameter_vsFront_centerPosition = PublishTopicItem("vsController/vsFront/setConfig/centerPosition")
+        self.get_vsCtrl_parameter_vsFront_procImageWidth = PublishTopicItem("vsController/vsFront/setConfig/procImageWidth")
 
         self.set_vsCtrl_vsRear_enableLiveView = PublishTopicItem("vsController/vsRear/enableLiveView")
         self.set_vsCtrl_vsRear_focusCamera = PublishTopicItem("vsController/vsRear/focusCamera")
@@ -102,6 +109,8 @@ class PublishTopics:
         self.set_vsCtrl_parameter_vsRear_sensorCropRight = PublishTopicItem("vsController/vsRear/setConfig/cropRight")
         self.set_vsCtrl_parameter_vsRear_sensorCropLeft = PublishTopicItem("vsController/vsRear/setConfig/cropLeft")
         self.set_vsCtrl_parameter_vsRear_sensorCropBottom = PublishTopicItem("vsController/vsRear/setConfig/cropBottom")
+        self.get_vsCtrl_parameter_vsRear_centerPosition = PublishTopicItem("vsController/vsRear/setConfig/centerPosition")
+        self.get_vsCtrl_parameter_vsRear_procImageWidth = PublishTopicItem("vsController/vsRear/setConfig/procImageWidth")
 
         # AutoFocusController (afCtrl)
         self.set_afCtrl_selectServo = PublishTopicItem("afController/control/selectServo")
@@ -111,7 +120,7 @@ class PublishTopics:
         self.set_afCtrl_unloadLens = PublishTopicItem("afController/control/unload")
 
 
-class SubscribeTopics:
+class GeneralSubscribeTopics:
     def __init__(self):
         # FilmMoveController
         self.get_fmCtrl_heartbeat = SubscribeTopicItem("filmMoveController/isOnline")
@@ -131,14 +140,20 @@ class SubscribeTopics:
         self.get_fmCtrl_totalPicCounter = SubscribeTopicItem("filmMoveController/pictureCounter/totalPics/curValue")
         self.get_fmCtrl_bwPicCounter = SubscribeTopicItem("filmMoveController/pictureCounter/bw/curValue")
         self.get_fmCtrl_colorPicCounter = SubscribeTopicItem("filmMoveController/pictureCounter/color/curValue")
-        self.get_fmCtrl_radiometricCalibrationPicCounter = SubscribeTopicItem("filmMoveController/pictureCounter/radiometricCalibration/curValue")
-        self.get_fmCtrl_geometricCalibrationPicCounter = SubscribeTopicItem("filmMoveController/pictureCounter/geometricCalibration/curValue")
+        self.get_fmCtrl_radiometricCalibrationPicCounter = SubscribeTopicItem(
+            "filmMoveController/pictureCounter/radiometricCalibration/curValue")
+        self.get_fmCtrl_geometricCalibrationPicCounter = SubscribeTopicItem(
+            "filmMoveController/pictureCounter/geometricCalibration/curValue")
 
-        self.get_fmCtrl_parameter_moveToPicture_distanceFast = SubscribeTopicItem("filmMoveController/getParameter/moveToPicture_distanceFast")
-        self.get_fmCtrl_parameter_moveToPicture_endVelocity = SubscribeTopicItem("filmMoveController/getParameter/moveToPicture_endVelocity")
-        self.get_fmCtrl_parameter_moveToPicture_fixedDistance = SubscribeTopicItem("filmMoveController/getParameter/moveToPicture_fixedDistance")
+        self.get_fmCtrl_parameter_moveToPicture_distanceFast = SubscribeTopicItem(
+            "filmMoveController/getParameter/moveToPicture_distanceFast")
+        self.get_fmCtrl_parameter_moveToPicture_endVelocity = SubscribeTopicItem(
+            "filmMoveController/getParameter/moveToPicture_endVelocity")
+        self.get_fmCtrl_parameter_moveToPicture_fixedDistance = SubscribeTopicItem(
+            "filmMoveController/getParameter/moveToPicture_fixedDistance")
         self.get_fmCtrl_parameter_moveFilm_velocity = SubscribeTopicItem("filmMoveController/getParameter/moveFilm_velocity")
-        self.get_fmCtrl_parameter_lockMotorsIfNoFilmIsLoaded = SubscribeTopicItem("filmMoveController/getParameter/lockMotorsIfNoFilmIsLoaded")
+        self.get_fmCtrl_parameter_lockMotorsIfNoFilmIsLoaded = SubscribeTopicItem(
+            "filmMoveController/getParameter/lockMotorsIfNoFilmIsLoaded")
         self.get_fmCtrl_parameter_autoUnloadFilm = SubscribeTopicItem("filmMoveController/getParameter/autoUnloadFilm")
         self.get_fmCtrl_parameter_vsSlowDownPosition = SubscribeTopicItem("filmMoveController/getParameter/vsSlowDownPosition")
 
@@ -204,6 +219,8 @@ class SubscribeTopics:
         self.get_vsCtrl_vsFront_parameter_sensorCropRight = SubscribeTopicItem("vsController/vsFront/getConfig/cropRight")
         self.get_vsCtrl_vsFront_parameter_sensorCropLeft = SubscribeTopicItem("vsController/vsFront/getConfig/cropLeft")
         self.get_vsCtrl_vsFront_parameter_sensorCropBottom = SubscribeTopicItem("vsController/vsFront/getConfig/cropBottom")
+        self.get_vsCtrl_vsFront_parameter_centerPosition = SubscribeTopicItem("vsController/vsFront/getConfig/centerPosition")
+        self.get_vsCtrl_vsFront_parameter_procImageWidth = SubscribeTopicItem("vsController/vsFront/getConfig/procImageWidth")
         self.get_vsCtrl_vsFront_parameter_stopPosition = SubscribeTopicItem("vsController/vsFront/getConfig/stopPosition")
         self.get_vsCtrl_vsFront_liveViewIsEnabled = SubscribeTopicItem("vsController/vsFront/liveViewIsEnabled")
 
@@ -221,6 +238,8 @@ class SubscribeTopics:
         self.get_vsCtrl_vsRear_parameter_sensorCropRight = SubscribeTopicItem("vsController/vsRear/getConfig/cropRight")
         self.get_vsCtrl_vsRear_parameter_sensorCropLeft = SubscribeTopicItem("vsController/vsRear/getConfig/cropLeft")
         self.get_vsCtrl_vsRear_parameter_sensorCropBottom = SubscribeTopicItem("vsController/vsRear/getConfig/cropBottom")
+        self.get_vsCtrl_vsRear_parameter_centerPosition = SubscribeTopicItem("vsController/vsRear/getConfig/centerPosition")
+        self.get_vsCtrl_vsRear_parameter_procImageWidth = SubscribeTopicItem("vsController/vsRear/getConfig/procImageWidth")
         self.get_vsCtrl_vsRear_parameter_stopPosition = SubscribeTopicItem("vsController/vsRear/getConfig/stopPosition")
 
         # AutoFocusController (afCtrl)
@@ -290,6 +309,8 @@ class VsControllerPublishTopics:
         self.set_vsFront_getCropRight = PublishTopicItem("vsController/vsFront/getConfig/cropRight")
         self.set_vsFront_getCropLeft = PublishTopicItem("vsController/vsFront/getConfig/cropLeft")
         self.set_vsFront_getCropBottom = PublishTopicItem("vsController/vsFront/getConfig/cropBottom")
+        self.set_vsFront_getCenterPosition = PublishTopicItem("vsController/vsFront/getConfig/centerPosition")
+        self.get_vsFront_getProcImageWidth = PublishTopicItem("vsController/vsFront/getConfig/procImageWidth")
         self.set_vsFront_getStopPosition = PublishTopicItem("vsController/vsFront/getConfig/stopPosition")
 
         self.set_vsRear_getImageWidth = PublishTopicItem("vsController/vsRear/getConfig/imageWidth")
@@ -298,6 +319,8 @@ class VsControllerPublishTopics:
         self.set_vsRear_getCropRight = PublishTopicItem("vsController/vsRear/getConfig/cropRight")
         self.set_vsRear_getCropLeft = PublishTopicItem("vsController/vsRear/getConfig/cropLeft")
         self.set_vsRear_getCropBottom = PublishTopicItem("vsController/vsRear/getConfig/cropBottom")
+        self.set_vsRear_getCenterPosition = PublishTopicItem("vsController/vsRear/getConfig/centerPosition")
+        self.get_vsRear_getProcImageWidth = PublishTopicItem("vsController/vsRear/getConfig/procImageWidth")
         self.set_vsRear_getStopPosition = PublishTopicItem("vsController/vsRear/getConfig/stopPosition")
 
         self.set_getExposureTime = PublishTopicItem("vsController/getConfig/sensorExposureTime")
@@ -305,9 +328,12 @@ class VsControllerPublishTopics:
 
 class VsControllerSubscribeTopics:
     def __init__(self):
+        self.get_fmCtrl_moveCommand = SubscribeTopicItem("filmMoveController/getMoveCommand")
         self.get_fmCtrl_filmMoveDirection = SubscribeTopicItem("filmMoveController/curFilmMoveDirection")
 
-        self.get_vsCtrl_enable_low_contrast_mode = SubscribeTopicItem("vsController/enable_lcm")
+        self.get_fmCtrl_filmMoveDirection = SubscribeTopicItem("filmMoveController/curFilmMoveDirection")
+
+        self.get_vsCtrl_enable_low_contrast_mode = SubscribeTopicItem("vsController/lcm_enabled")
 
         self.get_vsCtrl_swapSensors = SubscribeTopicItem("vsController/swapSensors")
         self.get_vsCtrl_centerImage = SubscribeTopicItem("vsController/setConfig/centerImage")
@@ -326,12 +352,16 @@ class VsControllerSubscribeTopics:
         self.get_vsFront_setCropRight = SubscribeTopicItem("vsController/vsFront/setConfig/cropRight")
         self.get_vsFront_setCropLeft = SubscribeTopicItem("vsController/vsFront/setConfig/cropLeft")
         self.get_vsFront_setCropBottom = SubscribeTopicItem("vsController/vsFront/setConfig/cropBottom")
+        self.get_vsFront_setCenterPosition = SubscribeTopicItem("vsController/vsFront/setConfig/centerPosition")
+        self.get_vsFront_setProcImageWidth = SubscribeTopicItem("vsController/vsFront/setConfig/procImageWidth")
         self.get_vsFront_setStopPosition = SubscribeTopicItem("vsController/vsFront/setConfig/stopPosition")
 
         self.get_vsRear_setCropTop = SubscribeTopicItem("vsController/vsRear/setConfig/cropTop")
         self.get_vsRear_setCropRight = SubscribeTopicItem("vsController/vsRear/setConfig/cropRight")
         self.get_vsRear_setCropLeft = SubscribeTopicItem("vsController/vsRear/setConfig/cropLeft")
         self.get_vsRear_setCropBottom = SubscribeTopicItem("vsController/vsRear/setConfig/cropBottom")
+        self.get_vsRear_setCenterPosition = SubscribeTopicItem("vsController/vsRear/setConfig/centerPosition")
+        self.get_vsRear_setProcImageWidth = SubscribeTopicItem("vsController/vsRear/setConfig/procImageWidth")
         self.get_vsRear_setStopPosition = SubscribeTopicItem("vsController/vsRear/setConfig/stopPosition")
 
         self.get_vsFront_captureImage = SubscribeTopicItem("vsController/vsFront/captureImage")
@@ -365,10 +395,11 @@ class MqttHandler(threading.Thread):
 
     def _onConnect(self, client, userdata, flags, rc):
         self._logInfoMqtt("Connected with result code " + str(rc))
-        for key, item in self.sTopics.__dict__.items():
-            if item.enabled:
-                client.subscribe(item.address)
-                self._logInfoMqtt("subscribe to topic: " + item.address)
+        if self.client_type is None:
+            for key, item in self.sTopics.__dict__.items():
+                if item.enabled:
+                    client.subscribe(item.address)
+                    self._logInfoMqtt("subscribe to topic: " + item.address)
         if self.client_type == "vsController":
             for key, item in self.sTopics_vsController.__dict__.items():
                 if item.enabled:
@@ -387,12 +418,13 @@ class MqttHandler(threading.Thread):
 
     def _onMessage(self, client, userdata, msg):
         cur_message = msg.payload.decode("utf-8").lower()
-        for key, item in self.sTopics.__dict__.items():
-            if item.enabled:
-                if msg.topic == item.address:
-                    item.value = cur_message
-                    if item.log_output:
-                        self._logInfoMqttReceiveMessage(msg.topic, cur_message)
+        if self.client_type is None:
+            for key, item in self.sTopics.__dict__.items():
+                if item.enabled:
+                    if msg.topic == item.address:
+                        item.value = cur_message
+                        if item.log_output:
+                            self._logInfoMqttReceiveMessage(msg.topic, cur_message)
 
         if self.client_type == "vsController":
             for key, item in self.sTopics_vsController.__dict__.items():
@@ -441,45 +473,22 @@ class MqttHandler(threading.Thread):
 
     def __init__(self, mqtt_broker_ip="192.168.0.5", client_id=None, external_logger=None, logger_enabled=True, client_type=None):
         threading.Thread.__init__(self)
+
         if external_logger is None:
             logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s",
                                 handlers=[logging.FileHandler("mqttLog.log"), logging.StreamHandler(sys.stdout)])
         else:
             self._externalLogger = external_logger
+
         self.loggerEnabled = logger_enabled
         self.client_type = client_type
-        self.pTopics = PublishTopics()
-        self.sTopics = SubscribeTopics()
+
         if self.client_type == "vsController":
             self.pTopics_vsController = VsControllerPublishTopics()
             self.sTopics_vsController = VsControllerSubscribeTopics()
-            self.sTopics.get_vsCtrl_low_contrast_mode_enabled.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_edgePosition.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_edgePosition.enabled = False
-            self.sTopics.get_vsCtrl_general_pictureIsInPosition.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_pictureIsInPosition.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_pictureIsInPosition.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_imageData.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_imageData.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_imageDataTn.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_imageDataTn.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_liveViewIsEnabled.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_liveViewIsEnabled.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_liveViewIsEnabled.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_liveViewIsEnabled.enabled = False
-            self.sTopics.get_vsCtrl_vsFront_fps.enabled = False
-            self.sTopics.get_vsCtrl_vsRear_fps.enabled = False
-            self.sTopics.get_vsCtrl_heartbeat.enabled = False
-            self.sTopics.get_fmCtrl_filmPosition.enabled = False
-            self.sTopics.get_fmCtrl_picToPicTime.enabled = False
-            self.sTopics.get_mCtrl_heartbeat.enabled = False
-            self.sTopics.get_fmCtrl_heartbeat.enabled = False
-            self.sTopics.get_fmCtrl_spoolDiameterFront.enabled = False
-            self.sTopics.get_fmCtrl_spoolDiameterRear.enabled = False
-            self.sTopics.get_fmCtrl_spoolTorqueFront.enabled = False
-            self.sTopics.get_fmCtrl_spoolTorqueRear.enabled = False
-            self.sTopics.get_fmCtrl_picToPicDistance.enabled = False
-
+        else:
+            self.pTopics = GeneralPublishTopics()
+            self.sTopics = GeneralSubscribeTopics()
         self._client_mqtt = mqtt.Client(client_id=client_id)
         self._client_mqtt.message_retry_set(0.1)
         self._client_mqtt.on_connect = self._onConnect
