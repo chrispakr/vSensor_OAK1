@@ -13,9 +13,9 @@ import os
 
 
 def list_media_devices():
-    # If the major number is 8, that indicates it to be a disk device.
+    # If the major number is 8, that indicates it to be a disk devices.
     #
-    # The minor number is the partitions on the same device:
+    # The minor number is the partitions on the same devices:
     # - 0 means the entire disk
     # - 1 is the primary
     # - 2 is extended
@@ -113,7 +113,7 @@ def get_size(device):
 
 
 def get_model(device):
-    path = get_device_block_path(device) + "/device/model"
+    path = get_device_block_path(device) + "/devices/model"
 
     if os.path.exists(path):
         with open(path, "r") as f:
@@ -122,7 +122,7 @@ def get_model(device):
 
 
 def get_vendor(device):
-    path = get_device_block_path(device) + "/device/vendor"
+    path = get_device_block_path(device) + "/devices/vendor"
 
     if os.path.exists(path):
         with open(path, "r") as f:
