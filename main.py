@@ -229,6 +229,7 @@ class VisionSensor(ValueHandler):
 
     def __init__(self, device_info, is_front_sensor, vs_name):
         # general Variables
+        super().__init__()
         self.controlIn = None
         self.x_out_edge_detection = None
         self.manip_edge_detection = None
@@ -239,7 +240,6 @@ class VisionSensor(ValueHandler):
         self.is_main_sensor = is_front_sensor
         self.film_type_is_negative = True
         self.edge_position = ValueHandler(-1)
-        #self.last_edge_position = 0
         self.total_edge_slope = 0
         self.lcm_enabled = False
         self.edge_position_tile_diff = 0
@@ -259,8 +259,6 @@ class VisionSensor(ValueHandler):
         self.np_image_info_edge_line = None
         self.np_image_info_setup_lines = None
         self.proc_image_centered = None
-        self.crop_image_right = 50
-        self._crop_image_left = 50
 
         self.left_edge_position = 0
         self.right_edge_position = 0
@@ -278,8 +276,8 @@ class VisionSensor(ValueHandler):
         self.slope_diff_rising = 0
         self.slope_diff_falling = 0
 
-        self.jpg_setup = None
-        self.jpg_setup_base64 = None
+        self.image_info_jpg = None
+        self.image_info_base64 = None
         self.captured_images = 0
 
         # preview image variables
@@ -373,6 +371,7 @@ class VisionSensor(ValueHandler):
         self.pipeline = dai.Pipeline()
 
         # Define sources and outputs
+        self.camCtrl = dai.CameraControl()
         self.camRgb = self.pipeline.create(dai.node.ColorCamera)
         self.manip_edge_detection = self.pipeline.create(dai.node.ImageManip)
         self.x_out_edge_detection = self.pipeline.create(dai.node.XLinkOut)
@@ -387,7 +386,7 @@ class VisionSensor(ValueHandler):
         self.camRgb.setPreviewSize(capture_width, capture_height)
         self.camRgb.setFps(camera_fps)
         self.camRgb.initialControl.setAutoFocusLensRange(120, 180)
-        self.camRgb.initialControl.setManualFocus(int(config_init.get(self.name, "lens_position")))
+        self.camRgb.initialControl.setManualFocus(150)
         self.camRgb.initialControl.setManualExposure(1200, 100)
         self.camRgb.setImageOrientation(dai.CameraImageOrientation.ROTATE_180_DEG)
         self.camRgb.setInterleaved(False)
@@ -537,8 +536,8 @@ class VisionSensor(ValueHandler):
                     self.autoFocusEnabled.value = False
                     self.set_focus_value(self.lens_position)
                     self.log_info_vSensor("disable AutoFocus")
-                    config_init.set(self.name, "lens_position", str(self.lens_position))
-                    write_init_config_to_file()
+                    # config_init.set(self.name, "lens_position", str(self.lens_position))
+                    # write_init_config_to_file()
             if self.autoExposureEnabled.value:
                 if (datetime.now() - self.ae_start_time).seconds > 2:
                     self.autoExposureEnabled.value = False
@@ -564,41 +563,15 @@ class VisionSensor(ValueHandler):
                      (img_width // 2 - self.proc_image_width, img_height), line_color_blue, 1)
             cv2.line(self.np_image_info_setup_lines, (img_width // 2 + self.proc_image_width, 0),
                      (img_width // 2 + self.proc_image_width, img_height), line_color_blue, 1)
-            center_image_line = ((img_width - self.crop_image_right - self._crop_image_left) // 2) + self._crop_image_left
             cv2.line(self.np_image_info_setup_lines, (img_width // 2, 0), (img_width // 2, img_height), line_color_red, 1)
 
-    def create_setup_jpg(self):
+    def create_image_info_jpg(self):
         if self.np_image_info_setup_lines is not None:
-            self.jpg_setup = jpeg.encode(self.np_image_info_setup_lines, quality=80)
-            self.jpg_setup_base64 = base64.b64encode(self.jpg_setup)
+            self.image_info_jpg = jpeg.encode(self.np_image_info_setup_lines, quality=80)
+            self.image_info_base64 = base64.b64encode(self.image_info_jpg)
             return True
         else:
             return False
-
-    def create_thumbnail_jpg(self):
-        np_image_info_tn = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
-
-        # rotate images for front/rear sensor
-        if self.is_front_sensor:
-            np_image_info_tn_rot = cv2.rotate(np_image_info_tn, 2)
-        else:
-            np_image_info_tn_rot = cv2.rotate(np_image_info_tn, 0)
-
-        if self.edge_is_in_position.value:
-            line_color = line_color_green
-        else:
-            line_color = line_color_orange
-
-        tn_width = int(np_image_info_tn_rot.shape[1] * self.tn_scale_percent / 100)
-        tn_height = int(np_image_info_tn_rot.shape[0] * self.tn_scale_percent / 100)
-        self.image_info_tn = cv2.resize(np_image_info_tn_rot, (tn_width, tn_height))
-        if self.is_front_sensor:
-            edge_position_tn = self.edge_position.value * self.tn_scale_percent // 100
-        else:
-            edge_position_tn = tn_width - (self.edge_position.value * self.tn_scale_percent // 100)
-        cv2.line(self.image_info_tn, (edge_position_tn, 0), (edge_position_tn, tn_height), line_color, 2)
-        self.jpg_info_tn = jpeg.encode(self.image_info_tn, quality=80)
-        self.jpg_info_tn_base64 = base64.b64encode(self.jpg_info_tn)
 
     def calc_statistics(self):
         if self.np_image_tile_left is not None and self.np_image_tile_right is not None:
@@ -616,16 +589,20 @@ class VisionSensor(ValueHandler):
         self.camCtrl.setAutoFocusTrigger()
         self.camera_control_queue.send(self.camCtrl)
 
-    def set_focus_value(self, lens_position):
+    @property
+    def focus_position(self):
+        # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
+        return self.lens_position
+
+    @focus_position.setter
+    def focus_position(self, lens_position):
         self.log_info_vSensor("Set lens-position to: {}".format(lens_position))
-        self.camCtrl = dai.CameraControl()
         # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
         self.camCtrl.setManualFocus(lens_position)
         self.camera_control_queue.send(self.camCtrl)
 
     def set_exposure_value(self, exposure):
         self.log_info_vSensor("Set exposure to: {}".format(exposure))
-        self.camCtrl = dai.CameraControl()
         # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
         self.camCtrl.setManualExposure(exposure, 100)
         self.camera_control_queue.send(self.camCtrl)
@@ -750,6 +727,11 @@ if config_settings.has_option(vs_front_config_name, "center_position"):
 if config_settings.has_option(vs_rear_config_name, "center_position"):
     vs_rear.image_center_position = config_settings.getint(vs_rear_config_name, "center_position")
 
+if config_init.has_option(vs_front_config_name, "lens_position"):
+    vs_front.lens_position = config_init.getint(vs_front_config_name, "lens_position")
+
+if config_init.has_option(vs_rear_config_name, "lens_position"):
+    vs_rear.lens_position = config_init.getint(vs_rear_config_name, "lens_position")
 
 logInfoGeneral("Connect to MQTT-Broker...")
 mqtt = mqtt_communication_handler.MqttHandler(logger_enabled=True, client_type="vsController", client_id="vsController", external_logger=logging)
@@ -927,31 +909,36 @@ with contextlib.ExitStack() as stack:
             vs_rear._stop_offset_compensation = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setStopOffset)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getStopOffset, vs_rear.stop_offset_compensation)
             config_settings.set(vs_rear_config_name, "stop_offset_compensation", str(vs_rear.stop_offset_compensation))
-            send_thumbnail.value = True
             write_settings_config = True
+            send_thumbnail.value = True
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setEdgeDetectionRange):
             vs_front.edge_detection_range = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsFront_setEdgeDetectionRange)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getEdgeDetectionRange, vs_front.edge_detection_range)
             config_settings.set(vs_front_config_name, "edge_detection_range", str(vs_front.edge_detection_range))
-            send_thumbnail.value = True
             write_settings_config = True
+            send_thumbnail.value = True
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setEdgeDetectionRange):
             vs_rear.edge_detection_range = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setEdgeDetectionRange)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getEdgeDetectionRange, vs_rear.edge_detection_range)
             config_settings.set(vs_rear_config_name, "edge_detection_range", str(vs_rear.edge_detection_range))
-            send_thumbnail.value = True
             write_settings_config = True
+            send_thumbnail.value = True
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setCenterPosition):
             vs_front.image_center_position = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsFront_setCenterPosition)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getCenterPosition, vs_front.image_center_position)
+            config_settings.set(vs_front_config_name, "center_position", str(vs_front.image_center_position))
+            write_settings_config = True
+
             send_thumbnail.value = True
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCenterPosition):
             vs_rear.image_center_position = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsRear_setCenterPosition)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getCenterPosition, vs_rear.image_center_position)
+            config_settings.set(vs_rear_config_name, "center_position", str(vs_rear.image_center_position))
+            write_settings_config = True
             send_thumbnail.value = True
 
         # Process Front-Sensor
@@ -1089,20 +1076,20 @@ with contextlib.ExitStack() as stack:
                 cv2.imshow("Sensor-Front - Stat-Image", vs_front.stat_image_full)
                 cv2.imshow("Sensor-Rear - Stat-Image", vs_rear.stat_image_full)
             # vs_front.create_thumbnail_jpg()
-            vs_front.create_setup_jpg()
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, vs_front.jpg_setup_base64)
-            print(vs_front.jpg_setup_base64)
+            vs_front.create_image_info_jpg()
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, vs_front.image_info_base64)
+            print(vs_front.image_info_base64)
             # mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, vs_front.jp)
-            vs_rear.create_setup_jpg()
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, vs_rear.jpg_setup_base64)
+            vs_rear.create_image_info_jpg()
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, vs_rear.image_info_base64)
             send_thumbnail.value = False
             # update_setup_jpg = True
 
         if update_setup_jpg:
             vs_front.create_image_info()
             vs_rear.create_image_info()
-            vs_front.create_setup_jpg()
-            vs_rear.create_setup_jpg()
+            vs_front.create_image_info_jpg()
+            vs_rear.create_image_info_jpg()
             logInfoGeneral("send updated image")
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, vs_front.jpg_info_full_base64)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, vs_rear.jpg_info_full_base64)
