@@ -5,7 +5,7 @@ def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
 
-def bool2Str(value):
+def bool2Int(value):
     if value:
         return 1
     else:
