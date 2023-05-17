@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
-import threading
-
 import cv2
-import io
 import platform
 import depthai as dai
 import time
-from threading import Event, Thread
-import numpy as np
-from pathlib import Path
 import contextlib
 import sys
-import base64
 from timeloop import Timeloop
 import logging
 from datetime import datetime, timedelta
 import mqtt_handler.mqtt_communication_handler_v2 as mqtt_communication_handler
 import libs.functions as ef
+from libs.functions import ValueHandler
 from configparser import ConfigParser
-from turbojpeg import TurboJPEG
 from collections import deque
 import libs.ads_communication as ads_handler
+from visionSensor import VisionSensor
 
 enable_chart = False
 showOutput = False
@@ -30,21 +24,11 @@ settings_config_file = "../config/settings.ini"
 
 if platform.system() == "Windows":
     import matplotlib.pyplot as plt
-    import matplotlib.animation as animation
     enable_chart = False
     init_config_file = "config/init.ini"
     settings_config_file = "config/settings.ini"
 
-# import calc_mean as CalcMean
-
 debug_vs = True
-
-edge_detection_slope_lcm = 30
-_edge_detection_slope_std = 50
-contrast_offset_lcm = 40
-contrast_offset_std = 100
-max_edge_position_diff = 15
-
 
 write_init_config = False
 write_settings_config = False
@@ -52,28 +36,7 @@ write_settings_config = False
 vs_front_config_name = "vs_front"
 vs_rear_config_name = "vs_rear"
 
-line_color_red = (32, 43, 255)
-line_color_green = (0, 255, 0)
-line_color_orange = (0, 165, 255)
-line_color_proc_image = (255, 0, 0)
-line_color_stop_position = (32, 43, 255)
-line_color_center_position = (163,136,22)
-line_color_stop_offset = (170, 102, 255)
-
-capture_width = 860
-capture_height = 600
-
-preview_width = 800
-
-update_setup_jpg = False
-
-camera_fps = 60
-
-# enable_live_view = False
-
-# reset_program = False
-
-# last_slope_value = 0
+camera_fps = 45
 
 mqtt_report_position_steps = 2
 
@@ -89,6 +52,9 @@ vs_rear_stop_offset = 0
 
 send_stop_motor_time = time.time()
 motor_stopped_time = time.time()
+
+vs_front_last_mqtt_position_value = 0
+vs_rear_last_mqtt_position_value = 0
 
 chart_length = 2000
 vs_front_chart_slope = deque(maxlen=chart_length)
@@ -117,51 +83,24 @@ def clamp(num, v0, v1):
     return max(v0, min(num, v1))
 
 
-class ValueHandler:
-    def __init__(self, value=None):
-        self._value = value
-        self.last_value = value
-
-    @property
-    def value(self):
-        return self._value
-
-    @value.setter
-    def value(self, val):
-        if val != self._value:
-            self.last_value = self._value
-            self._value = val
-
-    @property
-    def new_value_available(self):
-        if self.value != self.last_value:
-            return True
-        else:
-            return False
-
-    @new_value_available.setter
-    def new_value_available(self, value):
-        pass
-
-    def reset(self):
-        self.last_value = self.value
-
-
-vs_front_live_view_enabled =     ValueHandler(False)
-vs_rear_live_view_enabled =      ValueHandler(False)
+# vs_front_live_view_enabled =    ValueHandler(False)
+# vs_rear_live_view_enabled =     ValueHandler(False)
 image_is_centered =             ValueHandler(False)
-film_type_is_negative =         ValueHandler(True)
-vs_enable_low_contrast_mode =   ValueHandler(True)
+# film_type_is_negative =         ValueHandler(True)
+# vs_enable_low_contrast_mode =   ValueHandler(True)
 film_move_direction =           ValueHandler(0)
-vs_front_send_mqtt_image =      ValueHandler(False)
-vs_rear_send_mqtt_image =       ValueHandler(False)
-vs_front_send_mqtt_values =     ValueHandler(False)
-vs_rear_send_mqtt_values =      ValueHandler(False)
+
 
 vs_front_looking_for_picture_position = ValueHandler(False)
 vs_rear_looking_for_picture_position = ValueHandler(False)
 
 move_command = ValueHandler(0)
+
+vs_front_send_mqtt_image =      False
+vs_rear_send_mqtt_image =       False
+vs_front_send_mqtt_values =     False
+vs_rear_send_mqtt_values =      False
+
 
 vs_front_sent_stop_position =   0
 vs_rear_sent_stop_position =    0
@@ -173,24 +112,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-
 def log_info_general(message):
     log_message = "[general ]" + " - " + message
     logging.info(log_message)
 
-
-if platform.system() == "Windows":
-    log_info_general("set parameters for windows-system")
-    jpeg = TurboJPEG("libs/libturbojpeg.dll")
-    showOutput = True
-
-if platform.system() == "Linux":
-    log_info_general("set parameters for linux-system")
-    jpeg = TurboJPEG()
-    showOutput = False
-
 tl = Timeloop()
-
 
 def compute_stats(image):
     if image is not None:
@@ -238,457 +164,6 @@ def compute_stats(image):
     else:
         return None
 
-
-class VisionSensor(ValueHandler):
-    # _lens_position = 160
-    # tn_scale_percent = 100
-    fps_report_time = 10
-    _contrast_pic_height = 20
-    _contrast_pic_edge_offset = 10
-
-    def __init__(self, device_info, is_front_sensor, vs_name):
-        # general Variables
-        super().__init__()
-        self.controlIn = None
-        self.x_out_edge_detection = None
-        self.manip_edge_detection = None
-        self.camRgb = None
-
-        self.name = vs_name
-        self.device_info = device_info
-        self._is_front_sensor = is_front_sensor
-        # self.is_main_sensor = is_front_sensor
-        self.film_type_is_negative = True
-        self.edge_position = ValueHandler(-1)
-        self._total_edge_slope = 0
-        self.lcm_enabled = False
-        self.edge_position_tile_diff = 0
-        self.edge_detected = ValueHandler(False)
-        self.edge_is_in_position = ValueHandler(False)
-        self.edge_status = ValueHandler(0)
-        self._image_center_position = 450
-        self.proc_image_width = 400
-        self._stop_offset_compensation = 8
-        self._edge_detection_range = 30
-        self._edge_status = 0
-        self._stop_motor = False
-
-        # processing image variables
-        self.input_image_data = None
-        self.raw_input_image = None
-        self.np_image_tile_left = None
-        self.np_image_tile_right = None
-        self.np_image_info_edge_line = None
-        self.np_image_info_setup_lines = None
-        self.proc_image_centered = None
-
-        self._left_edge_position = 0
-        self._right_edge_position = 0
-
-        self.left_edge_slope = 0
-        self.right_edge_slope = 0
-
-        self.left_edge_results = None
-        self.right_edge_results = None
-
-        self._arr_slope_total_mean = deque(maxlen=40)
-        self._slope_total_mean = 0
-        self._new_edge_detected = 0
-        self._slope_diff = 0
-        self._slope_diff_rising = 0
-        self._slope_diff_falling = 0
-
-        self.image_info_jpg = None
-        self.image_info_base64 = None
-        self.captured_images = 0
-
-        # preview image variables
-        self._img_width = 0
-        self._img_height = 0
-        self.img_width = ValueHandler(0)
-        self.img_height = ValueHandler(0)
-
-        # fps variables
-        self.fps_elapsed_time = datetime.now()
-        self.fps_jpg_image_time = datetime.now()
-        self.fps = 0
-        self.fps_jpg_image = 0
-        self._fps_counter = 0
-        self._fps_counter_jpg_image = 0
-
-        # statistics image variables
-        self.stat_image_full = None
-        self._in_pic_median_left = 0
-        self._in_pic_median_right = 0
-        self._out_pic_median_left = 0
-        self._out_pic_median_right = 0
-        self._in_pic_median_total = 0
-        self._out_pic_median_total = 0
-
-        # camera control variables
-        self.camCtrl = None
-        self.exposure_time = ValueHandler(0)
-        self.af_start_time = datetime.now()
-        self.autoFocusEnabled = ValueHandler(False)
-        self.autoExposureFinished = False
-
-        self.ae_start_time = datetime.now()
-        self.autoExposureEnabled = ValueHandler(False)
-
-        self.pipeline = None
-        self.get_pipeline()
-        self.device = dai.Device(self.pipeline, self.device_info)
-        self.image_edge_queue = self.device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
-        self.camera_control_queue = self.device.getInputQueue('control')
-
-        self.capture_time = time.time()
-
-        self._stop_position = 350
-        self._lens_position = 130
-
-    @property
-    def stop_position(self):
-        return self._stop_position
-
-    @stop_position.setter
-    def stop_position(self, value):
-        self._stop_position = value
-        self._log_info_vsensor("change stop_position to: " + str(self._stop_position))
-
-    @property
-    def stop_offset_compensation(self):
-        return self._stop_offset_compensation
-
-    @stop_offset_compensation.setter
-    def stop_offset_compensation(self, value):
-        self._stop_offset_compensation = value
-        self._log_info_vsensor("change stop_offset_compensation to: " + str(self._stop_offset_compensation))
-
-    @property
-    def edge_detection_range(self):
-        return self._edge_detection_range
-
-    @edge_detection_range.setter
-    def edge_detection_range(self, value):
-        self._edge_detection_range = value
-        self._log_info_vsensor("change edge_detection_range to: " + str(self._edge_detection_range))
-
-    @property
-    def image_center_position(self):
-        return self._image_center_position
-
-    @image_center_position.setter
-    def image_center_position(self, value):
-        self._image_center_position = value
-        self._log_info_vsensor("change image_center_position to: " + str(self._image_center_position))
-
-
-    def get_pipeline(self):
-        # Create pipeline
-        self.pipeline = dai.Pipeline()
-
-        # Define sources and outputs
-        self.camRgb = self.pipeline.create(dai.node.ColorCamera)
-        self.manip_edge_detection = self.pipeline.create(dai.node.ImageManip)
-        self.x_out_edge_detection = self.pipeline.create(dai.node.XLinkOut)
-
-        self.controlIn = self.pipeline.create(dai.node.XLinkIn)
-
-        self.x_out_edge_detection.setStreamName('image_edge_detection')
-        self.controlIn.setStreamName('control')
-
-        # Properties
-        self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-        self.camRgb.setPreviewSize(capture_width, capture_height)
-        self.camRgb.setFps(camera_fps)
-        self.camRgb.initialControl.setAutoFocusLensRange(120, 180)
-        self.camRgb.initialControl.setManualFocus(150)
-        self.camRgb.initialControl.setManualExposure(1200, 100)
-        self.camRgb.setImageOrientation(dai.CameraImageOrientation.ROTATE_180_DEG)
-        self.camRgb.setInterleaved(False)
-        max_frame_size = self.camRgb.getPreviewWidth() * self.camRgb.getPreviewHeight() * 3
-
-        self.manip_edge_detection.initialConfig.setCropRect(0, 0, 1, 0.75)
-        self.manip_edge_detection.setMaxOutputFrameSize(max_frame_size)
-        self.manip_edge_detection.initialConfig.setFrameType(dai.RawImgFrame.Type.GRAY8)
-
-        # Links
-        self.camRgb.preview.link(self.manip_edge_detection.inputImage)
-        self.manip_edge_detection.out.link(self.x_out_edge_detection.input)
-        self.controlIn.out.link(self.camRgb.inputControl)
-
-    def process_image(self):
-        self.input_image_data = self.image_edge_queue.tryGet()
-        if self.input_image_data is not None:
-            self.np_image_info_setup_lines = None
-            self.image_info_jpg = None
-            self.image_info_base64 = None
-            # self.log_info_vsensor("capture-time: " + str(time.time() - self.capture_time))
-            self.capture_time = time.time()
-            self.edge_position.value = -1
-            self.raw_input_image = self.input_image_data.getCvFrame()
-            (full_image_height, full_image_width) = self.raw_input_image.shape[:2]
-            if self._image_center_position < preview_width // 2:
-                self._image_center_position = capture_width // 2
-            self.proc_image_centered = self.raw_input_image[0:full_image_height, self._image_center_position - (preview_width // 2):self._image_center_position + (preview_width // 2)]
-            self.np_image_tile_left = self.raw_input_image[0:self._stop_position + 50, self._image_center_position - self.proc_image_width:self._image_center_position-50]
-            self.np_image_tile_right = self.raw_input_image[0:self._stop_position + 50, self._image_center_position+50:self._image_center_position + self.proc_image_width]
-
-            self.left_edge_results = self.calc_edge_parameter(self.np_image_tile_left)
-            self.right_edge_results = self.calc_edge_parameter(self.np_image_tile_right)
-
-            if self.film_type_is_negative:
-                self._left_edge_position = self.left_edge_results[3]
-                self.left_edge_slope = int(self.left_edge_results[1])
-                self._right_edge_position = self.right_edge_results[3]
-                self.right_edge_slope = int(self.right_edge_results[1])
-            else:
-                self._left_edge_position = self.left_edge_results[2]
-                self.left_edge_slope = int(self.left_edge_results[0])
-                self._right_edge_position = self.right_edge_results[2]
-                self.right_edge_slope = int(self.right_edge_results[0])
-
-            self.edge_position_tile_diff = abs(self._left_edge_position - self._right_edge_position)
-            self._total_edge_slope = self.left_edge_slope + self.right_edge_slope
-
-            self._arr_slope_total_mean.append(self._total_edge_slope)
-            self._slope_total_mean = sum(self._arr_slope_total_mean) // len(self._arr_slope_total_mean)
-            self._slope_diff_rising = self._total_edge_slope - min(self._arr_slope_total_mean)
-            self._slope_diff_falling = self._slope_total_mean - max(self._arr_slope_total_mean)
-            if self._is_front_sensor:
-                self._slope_diff = self._total_edge_slope - self._slope_total_mean
-                if self._slope_total_mean > 0:
-                    slope_div = self._total_edge_slope / self._slope_total_mean
-
-            if (self._total_edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
-                # if self._is_front_sensor:
-                #     self._log_info_vsensor("edge-diff (rising): {}".format(self._slope_diff))
-                self._new_edge_detected = 200
-                self._arr_slope_total_mean.clear()
-                self._arr_slope_total_mean.append(self._total_edge_slope)
-            if (self._slope_total_mean - self._total_edge_slope) > 40 and self._new_edge_detected == 200:
-                # if self._is_front_sensor:
-                #     self._log_info_vsensor("edge-diff (falling): {}".format(self._slope_diff))
-                self._new_edge_detected = 0
-                self._arr_slope_total_mean.clear()
-                self._arr_slope_total_mean.append(self._total_edge_slope)
-            if self.lcm_enabled:
-                if self._total_edge_slope > edge_detection_slope_lcm:
-                    self.edge_position.value = (self._left_edge_position + self._right_edge_position) // 2
-            else:
-                if self._total_edge_slope > _edge_detection_slope_std:
-                    self.edge_position.value = (self._left_edge_position + self._right_edge_position) // 2
-
-            if self.edge_position.value > (self._contrast_pic_height + self._contrast_pic_edge_offset):
-                _in_pic_contrast_max_pos = self.edge_position.value - self._contrast_pic_edge_offset
-                _in_pic_contrast_min_pos = _in_pic_contrast_max_pos - self._contrast_pic_height
-                _in_pic_contrast_image_left = self.np_image_tile_left[_in_pic_contrast_min_pos:_in_pic_contrast_max_pos, 0:self.proc_image_width]
-                _in_pic_contrast_image_right = self.np_image_tile_right[_in_pic_contrast_min_pos:_in_pic_contrast_max_pos, 0:self.proc_image_width]
-                self._in_pic_median_left = np.median(_in_pic_contrast_image_left)
-                self._in_pic_median_right = np.median(_in_pic_contrast_image_right)
-                self._in_pic_median_total = self._in_pic_median_left + self._in_pic_median_right
-
-                _out_pic_contrast_min_pos = self.edge_position.value + self._contrast_pic_edge_offset
-                _out_pic_contrast_max_pos = _out_pic_contrast_min_pos + self._contrast_pic_height
-                _out_pic_contrast_image_left = self.np_image_tile_left[_out_pic_contrast_min_pos:_out_pic_contrast_max_pos, 0:self.proc_image_width]
-                _out_pic_contrast_image_right = self.np_image_tile_right[_out_pic_contrast_min_pos:_out_pic_contrast_max_pos, 0:self.proc_image_width]
-                self._out_pic_median_left = np.median(_out_pic_contrast_image_left)
-                self._out_pic_median_right = np.median(_out_pic_contrast_image_right)
-                self._out_pic_median_total = self._out_pic_median_left + self._out_pic_median_right
-
-            self._edge_status = 0
-
-            if self.lcm_enabled:
-                if self.film_type_is_negative:
-                    if self._in_pic_median_total + contrast_offset_lcm < self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
-                    else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
-
-                else:
-                    if self._in_pic_median_total + contrast_offset_lcm > self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
-                    else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
-            else:
-                if self.film_type_is_negative:
-                    if self._in_pic_median_total + contrast_offset_std < self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
-                    else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
-                else:
-                    if self._in_pic_median_total + contrast_offset_std > self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
-                    else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
-
-            if (self._stop_position - (self._edge_detection_range//2)) < self.edge_position.value < (self._stop_position + (self._edge_detection_range // 2)):
-                self.edge_is_in_position.value = True
-            else:
-                self.edge_is_in_position.value = False
-
-            if self.edge_detected.value and self.edge_is_in_position.value:
-                self._edge_status = 2
-
-            self.edge_status.value = self._edge_status
-
-            self.captured_images += 1
-            self._fps_counter += 1
-
-            if (datetime.now() - self.fps_elapsed_time).seconds >= self.fps_report_time:
-                self.fps = self._fps_counter // self.fps_report_time
-                self.fps_elapsed_time = datetime.now()
-                self._fps_counter = 0
-            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
-                self.exposure_time.value = int(self.input_image_data.getExposureTime().total_seconds() * 1000000)
-            if self.input_image_data.getLensPosition() != self._lens_position:
-                self._lens_position = self.input_image_data.getLensPosition()
-                self._log_info_vsensor("lens-position changed to: {}".format(self._lens_position))
-            if self.autoFocusEnabled.value:
-                if (datetime.now() - self.af_start_time).seconds > 2:
-                    self.autoFocusEnabled.value = False
-                    self.focus_position = self._lens_position
-                    self._log_info_vsensor("disable AutoFocus")
-            if self.autoExposureEnabled.value:
-                if (datetime.now() - self.ae_start_time).seconds > 2:
-                    self.autoExposureEnabled.value = False
-                    self.camCtrl.setAutoExposureLock(True)
-                    self._log_info_vsensor("disable AutoExposure")
-                    self.camera_control_queue.send(self.camCtrl)
-                    self.autoExposureFinished = True
-            return True
-        else:
-            return False
-
-    def create_image_info(self):
-        if self.proc_image_centered is not None:
-            self.np_image_info_edge_line = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
-            self._img_height, self._img_width, dim = self.np_image_info_edge_line.shape
-            self.img_width.value = self._img_width
-            self.img_height.value = self._img_height
-            if self.edge_is_in_position.value:
-                line_color = line_color_green
-            else:
-                line_color = line_color_orange
-
-            cv2.line(self.np_image_info_edge_line, (0, self._stop_position), (100, self._stop_position), line_color_stop_position, 2)
-            cv2.line(self.np_image_info_edge_line, (self._img_width-100, self._stop_position), (self._img_width, self._stop_position), line_color_stop_position, 2)
-            cv2.line(self.np_image_info_edge_line, (self._img_width - 50, self._stop_position-self.stop_offset_compensation), (self._img_width, self._stop_position-self.stop_offset_compensation), line_color_stop_offset, 2)
-            cv2.line(self.np_image_info_edge_line, (0, self._stop_position - self.stop_offset_compensation), (50, self._stop_position - self.stop_offset_compensation),
-                     line_color_stop_offset, 2)
-            cv2.line(self.np_image_info_edge_line, (0, self.edge_position.value), (self._img_width, self.edge_position.value), line_color, 2)
-            self.np_image_info_setup_lines = self.np_image_info_edge_line
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 - self.proc_image_width, 0),
-                     (self._img_width // 2 - self.proc_image_width, self._img_height), line_color_proc_image, 1)
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 + self.proc_image_width, 0),
-                     (self._img_width // 2 + self.proc_image_width, self._img_height), line_color_proc_image, 1)
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2, 0), (self._img_width // 2, self._img_height), line_color_center_position, 1)
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2, self._img_height-60), (self._img_width // 2, self._img_height), line_color_center_position, 2)
-            return True
-        else:
-            return False
-
-    def create_image_info_jpg(self):
-        if self.np_image_info_setup_lines is None:
-            self.create_image_info()
-        if self.np_image_info_setup_lines is not None:
-            self.image_info_jpg = jpeg.encode(self.np_image_info_setup_lines, quality=80)
-            self.image_info_base64 = base64.b64encode(self.image_info_jpg)
-            return True
-        else:
-            return False
-
-    def calc_statistics(self):
-        if self.np_image_tile_left is not None and self.np_image_tile_right is not None:
-            tile_height, tile_width = self.np_image_tile_left.shape
-            stat_image_tile_left = self.np_image_tile_left[0:self.edge_position.value - 20, 0:tile_width]
-            stat_image_tile_right = self.np_image_tile_right[0:self.edge_position.value - 20, 0:tile_width]
-            self.stat_image_full = np.concatenate((stat_image_tile_left, stat_image_tile_right), axis=1)
-
-    def auto_focus_camera(self):
-        self._log_info_vsensor("Focus Camera...")
-        self.autoFocusEnabled.value = True
-        self.af_start_time = datetime.now()
-        self.camCtrl = dai.CameraControl()
-        self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_PICTURE)
-        self.camCtrl.setAutoFocusTrigger()
-        self.camera_control_queue.send(self.camCtrl)
-
-    @property
-    def stop_motor(self):
-        if self._stop_motor:
-            self._stop_motor = False
-            return True
-        else:
-            return False
-
-    @stop_motor.setter
-    def stop_motor(self, value):
-        pass
-
-    @property
-    def focus_position(self):
-        # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
-        return self._lens_position
-
-    @focus_position.setter
-    def focus_position(self, lens_position):
-        self._log_info_vsensor("Set lens-position to: {}".format(lens_position))
-        self.camCtrl = dai.CameraControl()
-        self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
-        self.camCtrl.setManualFocus(lens_position)
-        self.camera_control_queue.send(self.camCtrl)
-
-    def set_exposure_value(self, exposure):
-        self._log_info_vsensor("Set exposure to: {}".format(exposure))
-        self.camCtrl = dai.CameraControl()
-        # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
-        self.camCtrl.setManualExposure(exposure, 100)
-        self.camera_control_queue.send(self.camCtrl)
-
-    def auto_exposure_camera(self):
-        self._log_info_vsensor("Sensor Auto-Exposure...")
-        self.autoExposureEnabled.value = True
-        self.ae_start_time = datetime.now()
-        self.camCtrl = dai.CameraControl()
-        self.camCtrl.setAutoExposureEnable()
-        self.camera_control_queue.send(self.camCtrl)
-
-    @staticmethod
-    def calc_edge_parameter(image):
-        start_time = time.time()
-        slope_and_pos_output = ([0, 0, 0, 0])
-        if image is not None:
-            reduced = np.mean(image, axis=1)
-            # compute the slope values at +/-3
-            slope = [(reduced[i + 3] - reduced[i - 3]) for i in range(3, len(reduced) - 3, 1)]
-            # compute the minVal, minPos, maxVal, maxPos of the slopes
-
-            min_slope = min(slope)
-            max_slope = max(slope)
-            min_pos = slope.index(min_slope)
-            max_pos = slope.index(max_slope)
-
-            # prepare slopes and positions for output
-            slope_and_pos_output = ([min_slope * -1, max_slope, min_pos, max_pos])
-        return slope_and_pos_output
-
-    def _log_info_vsensor(self, message):
-        message = str(message)
-        if self._is_front_sensor:
-            log_message = "[vs-front]" + " - " + message
-        else:
-            log_message = "[vs-rear ]" + " - " + message
-        logging.info(log_message)
-
 # Read Init-Configuration
 log_info_general("read init-config file..")
 config_init = ConfigParser()
@@ -705,6 +180,8 @@ def write_settings_config_to_file():
     log_info_general("write sensor-config file..")
     with open(settings_config_file, 'w') as configfile:
         config_settings.write(configfile)
+
+log_info_general("DephtAi-Version : {}".format(dai.__version__))
 
 devices_found = dai.Device.getAllAvailableDevices()
 
@@ -734,22 +211,16 @@ if not found_front_sensor:
 if not found_rear_sensor:
     raise RuntimeError("RearSensor not found!")
 
-# if platform.system() == "Linux":
-#     pyads.open_port()
-#     pyads.set_local_address("192.168.0.30.1.1")
-#     pyads.close_port()
-#
-#     pyads.ads.add_route('5.71.85.220.1.1', "192.168.0.10")
-#
-#     pyads.add_route_to_plc("192.168.0.30.1.1", "192.168.0.30", "192.168.0.10", "admin", "geodyn2905", route_name="pi")
-#
-# plc = pyads.Connection('5.71.85.220.1.1', pyads.PORT_TC3PLC1, "192.168.0.10")
-# plc.open()
+if config_init.has_option("general", "fps"):
+    camera_fps = config_init.getint("general", "fps")
+else:
+    log_info_general("No config parameter found for 'FPS' - set standard value of 45")
+    camera_fps = 45
 
 plc_handler = ads_handler.AdsHandler()
 
-vs_front = VisionSensor(device_info_front_sensor, True, vs_front_config_name)
-vs_rear = VisionSensor(device_info_rear_sensor, False, vs_rear_config_name)
+vs_front = VisionSensor(device_info_front_sensor, True, vs_front_config_name, fps=camera_fps, logger=logging)
+vs_rear = VisionSensor(device_info_rear_sensor, False, vs_rear_config_name, fps=camera_fps, logger=logging)
 
 if config_settings.has_option(vs_front_config_name, "proc_image_width"):
     vs_front.proc_image_width = config_settings.getint(vs_front_config_name, "proc_image_width")
@@ -776,17 +247,18 @@ if config_settings.has_option(vs_front_config_name, "center_position"):
 if config_settings.has_option(vs_rear_config_name, "center_position"):
     vs_rear.image_center_position = config_settings.getint(vs_rear_config_name, "center_position")
 
-if config_init.has_option(vs_front_config_name, "_lens_position"):
-    vs_front._lens_position = config_init.getint(vs_front_config_name, "_lens_position")
+if config_init.has_option(vs_front_config_name, "lens_position"):
+    vs_front._lens_position = config_init.getint(vs_front_config_name, "lens_position")
 
-if config_init.has_option(vs_rear_config_name, "_lens_position"):
-    vs_rear._lens_position = config_init.getint(vs_rear_config_name, "_lens_position")
+if config_init.has_option(vs_rear_config_name, "lens_position"):
+    vs_rear._lens_position = config_init.getint(vs_rear_config_name, "lens_position")
+
 
 log_info_general("Connect to MQTT-Broker...")
 mqtt = mqtt_communication_handler.MqttHandler(logger_enabled=True, client_type="vsController", client_id="vsController", external_logger=logging)
 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_vsController_sensorVersion, "3")
-mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_low_contrast_mode_enabled, ef.bool2Int(False))
-mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_filmTypeIsNegative, film_type_is_negative.value)
+mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_getLcmModeEnabled, ef.bool2Int(False))
+mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_filmTypeIsNegative, vs_front.film_type_is_negative)
 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getStopPosition, vs_front.stop_position)
 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getStopPosition, vs_rear.stop_position)
 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getStopOffset, vs_front.stop_offset_compensation)
@@ -796,6 +268,9 @@ mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getEdgeDetectionRange, vs
 
 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getCenterPosition, vs_front.image_center_position)
 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getCenterPosition, vs_rear.image_center_position)
+
+mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_getLcmModeEnabled, vs_front.lcm_enabled)
+mqtt.setMqttValue(mqtt.pTopics_vsController.set_getLcmSlope, vs_front.edge_detection_slope_lcm)
 
 mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setFilmTypeIsNegative)
 mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection)
@@ -827,10 +302,14 @@ mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setEdgeDetecti
 mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setCenterPosition)
 mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCenterPosition)
 
+mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setExposureTime)
+
+
+
 # mqtt.sTopics_vsController.get_fmCtrl_moveCommand.log_output = True
 # mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection.log_output = True
 #
-# mqtt.pTopics_vsController.set_vsFront_edgePosition.log_output = True
+mqtt.pTopics_vsController.set_vsFront_edgePosition.log_output = True
 # mqtt.pTopics_vsController.set_vsRear_edgePosition.log_output = True
 # mqtt.pTopics_vsController.set_vsFront_getExposureTimeLive.log_output = True
 # mqtt.pTopics_vsController.set_vsRear_getExposureTimeLive.log_output = True
@@ -841,6 +320,9 @@ mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCenterPosit
 # mqtt.pTopics_vsController.set_vsFront_imageData.log_output = True
 # mqtt.pTopics_vsController.set_vsRear_imageData.log_output = True
 
+mqtt.pTopics_vsController.set_vsFront_edgePosition.log_output = True
+mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection.log_output = True
+mqtt.sTopics_vsController.get_fmCtrl_moveCommand.log_output = True
 
 @tl.job(interval=timedelta(seconds=3))
 def mqtt_heartbeat():
@@ -848,8 +330,8 @@ def mqtt_heartbeat():
 
 tl.start()
 
-vs_front.lcm_enabled = vs_enable_low_contrast_mode.value
-vs_rear.lcm_enabled = vs_enable_low_contrast_mode.value
+vs_front.lcm_enabled = False
+vs_rear.lcm_enabled = False
 
 if enable_chart:
     ed_value = 0
@@ -876,19 +358,15 @@ with contextlib.ExitStack() as stack:
 
         # Check enableLiveView on vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_vsFront_enableLiveView):
-            vs_front_live_view_enabled.value = ef.str2bool(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_vsFront_enableLiveView))
-
-        if vs_front_live_view_enabled.new_value_available:
-            log_info_general("(vsFront) set enableLiveView to: " + str(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_vsFront_enableLiveView)))
-            mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsFront_liveViewIsEnabled, ef.bool2Int(vs_front_live_view_enabled.value))
+            vs_front.enable_live_view = ef.str2bool(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_vsFront_enableLiveView))
+            log_info_general("(vsFront) set enableLiveView to: " + str(vs_front.enable_live_view))
+            mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsFront_liveViewIsEnabled, ef.bool2Int(vs_front.enable_live_view))
 
         # Check enableLiveView on vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_vsRear_enableLiveView):
-            vs_rear_live_view_enabled.value = ef.str2bool(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_vsRear_enableLiveView))
-
-        if vs_rear_live_view_enabled.new_value_available:
-            log_info_general("(vsRear) set enableLiveView to: " + str(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_vsRear_enableLiveView)))
-            mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsRear_liveViewIsEnabled, ef.bool2Int(vs_rear_live_view_enabled.value))
+            vs_rear.enable_live_view = ef.str2bool(mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_vsRear_enableLiveView))
+            log_info_general("(vsRear) set enableLiveView to: " + str(vs_rear.enable_live_view))
+            mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsRear_liveViewIsEnabled, ef.bool2Int(vs_rear.enable_live_view))
 
         # Check moveCommand
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_fmCtrl_moveCommand):
@@ -896,66 +374,74 @@ with contextlib.ExitStack() as stack:
 
         if move_command.new_value_available:
             log_info_general("moveCommand(mqtt) changed to: " + str(move_command.value))
-            if move_command.value == 0 and move_command.last_value > 0:
+            if move_command.value == 0 and move_command.previous_value > 0:
                 log_info_general("command-time-offset: " + str((time.time() - send_stop_motor_time)*1000) + " ms")
 
         # Check filmMoveDirection
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection):
             film_move_direction.value = int(mqtt.getMqttValue(mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection))
 
-        if film_move_direction.new_value_available:
-            log_info_general("FilmMoveDirection changed to: " + str(film_move_direction.value))
-            if film_move_direction.value == 0 and film_move_direction.last_value > 0:
-                log_info_general("Motor Stopped...")
-                vs_front_send_mqtt_image.value = True
-                vs_rear_send_mqtt_image.value = True
-                vs_front_send_mqtt_values.value = True
-                vs_rear_send_mqtt_values.value = True
-
+        # focus camera front
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_vsFront_focusCamera):
             log_info_general("trigger AutoFocus on vsRear")
             vs_front.auto_focus_camera()
 
+        # focus camera rear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_vsRear_focusCamera):
             log_info_general("trigger AutoFocus on vsRear")
             vs_rear.auto_focus_camera()
 
-        if vs_front.autoFocusEnabled.new_value_available:
-            if not vs_front.autoFocusEnabled.value:
-                log_info_general("autoFocus on vs_front finished... ")
-                # vs_front_send_mqtt_image.value = True
+        # focus camera front finished
+        if vs_front.autoFocusFinished:
+            log_info_general("autoFocus on vs_front finished... ")
+            vs_front.autoFocusFinished = False
+            vs_front_send_mqtt_image = True
 
-        if vs_rear.autoFocusEnabled.new_value_available:
-            if not vs_rear.autoFocusEnabled.value:
-                log_info_general("autoFocus on vs_rear finished... ")
-                # vs_rear_send_mqtt_image.value = True
+        # focus camera rear finished
+        if vs_rear.autoFocusFinished:
+            log_info_general("autoFocus on vs_rear finished... ")
+            vs_rear.autoFocusFinished = False
+            vs_rear_send_mqtt_image = True
 
+        # auto exposure cameras
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_autoExposureCamera):
             vs_front.auto_exposure_camera()
             vs_rear.auto_exposure_camera()
 
+        # auto exposure cameras finished
         if vs_front.autoExposureFinished and vs_rear.autoExposureFinished:
             exposure_mean = round((vs_front.exposure_time.value + vs_rear.exposure_time.value) // 2, -2)
             vs_front.set_exposure_value(exposure_mean)
             vs_rear.set_exposure_value(exposure_mean)
             vs_front.autoExposureFinished = False
             vs_rear.autoExposureFinished = False
+            vs_front_send_mqtt_image = True
+            vs_rear_send_mqtt_image = True
             log_info_general("set exposure to: {}".format(exposure_mean))
 
-        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setFilmTypeIsNegative):
-            film_type_is_negative.value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setFilmTypeIsNegative)
+        # set exposure-time to cameras
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setExposureTime):
+            t_exposure_time = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setExposureTime)
+            vs_front.set_exposure_value(t_exposure_time)
+            vs_rear.set_exposure_value(t_exposure_time)
+            vs_front_send_mqtt_image = True
+            vs_rear_send_mqtt_image = True
+            log_info_general("set exposure to: {}".format(t_exposure_time))
 
-        if film_type_is_negative.new_value_available:
-            vs_front.film_type_is_negative = film_type_is_negative.value
-            vs_rear.film_type_is_negative = film_type_is_negative.value
-            if film_type_is_negative.value:
+        # set film-type positive/negative
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setFilmTypeIsNegative):
+            t_value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setFilmTypeIsNegative)
+            vs_front.film_type_is_negative = t_value
+            vs_rear.film_type_is_negative = t_value
+            if t_value:
                 vs_front.set_exposure_value(exposure_value_negative)
                 vs_rear.set_exposure_value(exposure_value_negative)
             else:
                 vs_front.set_exposure_value(exposure_value_positive)
                 vs_rear.set_exposure_value(exposure_value_positive)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_filmTypeIsNegative, ef.bool2Int(film_type_is_negative.value))
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_filmTypeIsNegative, ef.bool2Int(t_value))
 
+        # swap sensors
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_swapSensors):
             vs_front_serial = config_init.get(vs_front_config_name, "serial")
             vs_rear_serial = config_init.get(vs_rear_config_name, "serial")
@@ -964,30 +450,43 @@ with contextlib.ExitStack() as stack:
             write_init_config = True
 
         # Check enableLowContrastMode
-        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_enable_low_contrast_mode):
-            vs_enable_low_contrast_mode.value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_enable_low_contrast_mode)
-
-        if vs_enable_low_contrast_mode.new_value_available:
-            log_info_general("set enableLowContrastMode to: " + str(vs_enable_low_contrast_mode.value))
-            if vs_enable_low_contrast_mode.value:
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsCtrl_setEnableLcmMode):
+            t_value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_vsCtrl_setEnableLcmMode)
+            log_info_general("set enableLowContrastMode to: " + str(t_value))
+            if t_value:
                 vs_front.lcm_enabled = True
                 vs_rear.lcm_enabled = True
-                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_low_contrast_mode_enabled, ef.bool2Int(True))
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_getLcmModeEnabled, ef.bool2Int(True))
             else:
                 vs_front.lcm_enabled = False
                 vs_rear.lcm_enabled = False
-                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_low_contrast_mode_enabled, ef.bool2Int(False))
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsCtrl_getLcmModeEnabled, ef.bool2Int(False))
+
+        # lcm set lcm_slope
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setLcmSlope):
+            t_value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setLcmSlope)
+            log_info_general("set lcmSlope to: " + str(t_value))
+            vs_front.edge_detection_slope_lcm = t_value
+            vs_rear.edge_detection_slope_lcm = t_value
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_getLcmSlope, t_value)
+
+        # lcm set lcm_contrast
+        if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setLcmContrastOffset):
+            t_value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setLcmContrastOffset)
+            log_info_general("set lcmContrast to: " + str(t_value))
+            vs_front.contrast_offset_lcm = t_value
+            vs_rear.contrast_offset_lcm = t_value
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_getLcmContrastOffset, vs_front.contrast_offset_lcm)
 
         # Capture Image vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_captureImage):
-            vs_front_send_mqtt_image.value = True
-            vs_front_send_mqtt_values.value = True
+            vs_front_send_mqtt_image = True
+            vs_front_send_mqtt_values = True
 
         # Capture Image vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_captureImage):
-            log_info_general("capture rear image")
-            vs_rear_send_mqtt_image.value = True
-            vs_rear_send_mqtt_values.value = True
+            vs_rear_send_mqtt_image = True
+            vs_rear_send_mqtt_values = True
 
         # set procImageWidth on vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setProcImageWidth):
@@ -995,7 +494,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsFront_getProcImageWidth, vs_front.proc_image_width)
             config_settings.set(vs_front_config_name, "proc_image_width", str(vs_front.proc_image_width))
             write_settings_config = True
-            vs_front_send_mqtt_image.value = True
+            vs_front_send_mqtt_image = True
 
         # set procImageWidth on vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setProcImageWidth):
@@ -1003,7 +502,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsRear_getProcImageWidth, vs_rear.proc_image_width)
             config_settings.set(vs_rear_config_name, "proc_image_width", str(vs_rear.proc_image_width))
             write_settings_config = True
-            vs_rear_send_mqtt_image.value = True
+            vs_rear_send_mqtt_image = True
 
         # set stopPosition on vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setStopPosition):
@@ -1011,7 +510,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getStopPosition, vs_front.stop_position)
             config_settings.set(vs_front_config_name, "stop_position", str(vs_front.stop_position))
             write_settings_config = True
-            vs_front_send_mqtt_image.value = True
+            vs_front_send_mqtt_image = True
 
         # set stopPosition on vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setStopPosition):
@@ -1019,7 +518,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getStopPosition, vs_rear.stop_position)
             config_settings.set(vs_rear_config_name, "stop_position", str(vs_rear.stop_position))
             write_settings_config = True
-            vs_rear_send_mqtt_image.value = True
+            vs_rear_send_mqtt_image = True
 
         # set stopOffset on vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setStopOffset):
@@ -1027,7 +526,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getStopOffset, vs_front.stop_offset_compensation)
             config_settings.set(vs_front_config_name, "stop_offset_compensation", str(vs_front.stop_offset_compensation))
             write_settings_config = True
-            vs_front_send_mqtt_image.value = True
+            vs_front_send_mqtt_image = True
 
         # set stopOffset on vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setStopOffset):
@@ -1035,7 +534,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getStopOffset, vs_rear.stop_offset_compensation)
             config_settings.set(vs_rear_config_name, "stop_offset_compensation", str(vs_rear.stop_offset_compensation))
             write_settings_config = True
-            vs_rear_send_mqtt_image.value = True
+            vs_rear_send_mqtt_image = True
 
         # set edgeDetectionRange on vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setEdgeDetectionRange):
@@ -1043,7 +542,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getEdgeDetectionRange, vs_front.edge_detection_range)
             config_settings.set(vs_front_config_name, "edge_detection_range", str(vs_front.edge_detection_range))
             write_settings_config = True
-            vs_front_send_mqtt_image.value = True
+            vs_front_send_mqtt_image = True
 
         # set edgeDetectionRange on vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setEdgeDetectionRange):
@@ -1051,7 +550,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getEdgeDetectionRange, vs_rear.edge_detection_range)
             config_settings.set(vs_rear_config_name, "edge_detection_range", str(vs_rear.edge_detection_range))
             write_settings_config = True
-            vs_rear_send_mqtt_image.value = True
+            vs_rear_send_mqtt_image = True
 
         # set centerPosition on vsFront
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsFront_setCenterPosition):
@@ -1059,7 +558,7 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getCenterPosition, vs_front.image_center_position)
             config_settings.set(vs_front_config_name, "center_position", str(vs_front.image_center_position))
             write_settings_config = True
-            vs_front_send_mqtt_image.value = True
+            vs_front_send_mqtt_image = True
 
         # set centerPosition on vsRear
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_vsRear_setCenterPosition):
@@ -1067,22 +566,23 @@ with contextlib.ExitStack() as stack:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getCenterPosition, vs_rear.image_center_position)
             config_settings.set(vs_rear_config_name, "center_position", str(vs_rear.image_center_position))
             write_settings_config = True
-            vs_rear_send_mqtt_image.value = True
+            vs_rear_send_mqtt_image = True
 
         ##################################################################################################################
         # IMAGE PROCESSING PART
         ##################################################################################################################
+
         if vs_front.process_image() or vs_rear.process_image():
-            if vs_front_live_view_enabled.value:
+            if vs_front.enable_live_view:
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
-                    log_info_general("image")
-                    vs_front_send_mqtt_image.value = True
+                    # log_info_general("image")
+                    vs_front_send_mqtt_image = True
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
 
-            if vs_rear_live_view_enabled.value:
+            if vs_rear.enable_live_view:
                 if vs_rear_live_view_frame_nr == live_view_fps_divider:
-                    vs_rear_send_mqtt_image.value = True
+                    vs_rear_send_mqtt_image = True
                     vs_rear_live_view_frame_nr = 0
                 vs_rear_live_view_frame_nr += 1
 
@@ -1135,20 +635,6 @@ with contextlib.ExitStack() as stack:
             if vs_rear.exposure_time.new_value_available:
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getExposureTimeLive, vs_rear.exposure_time.value)
 
-            # vsFront - edge-position
-            if vs_front.edge_position.new_value_available and film_move_direction.value == 1:
-                log_info_general("vs_front edge position changed to: " + str(vs_front.edge_position.value))
-                # plc.write_by_name("MAIN.vSensor_Front_EdgePosition", vs_front.edge_position.value)
-                if (vs_front.edge_position.value % mqtt_report_position_steps) == 0 or vs_front.edge_position.value == -1:
-                    mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition, vs_front.edge_position.value)
-
-            # vsRear - edge-position
-            if vs_rear.edge_position.new_value_available and film_move_direction.value == 2:
-                log_info_general("vs_rear edge position changed to: " + str(vs_rear.edge_position.value))
-                # plc.write_by_name("MAIN.vSensor_Rear_EdgePosition", vs_rear.edge_position.value)
-                if (vs_rear.edge_position.value % mqtt_report_position_steps) == 0 or vs_rear.edge_position.value == -1:
-                    mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_edgePosition, vs_rear.edge_position.value)
-
             # vsFront - edge-detected
             if vs_front.edge_detected.new_value_available:
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgeDetected, ef.bool2Int(vs_front.edge_detected.value))
@@ -1157,17 +643,11 @@ with contextlib.ExitStack() as stack:
             if vs_rear.edge_detected.new_value_available:
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_edgeDetected, ef.bool2Int(vs_rear.edge_detected.value))
 
-            # if vs_front.edge_is_in_position.new_value_available:
-            #     if vs_front.edge_position.value < 0 <= vs_front.edge_position.last_value:
-            #         plc_handler.stop_film = False
-            #         mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
-            #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_pictureIsInPosition, ef.bool2Int(vs_front.edge_is_in_position.value))
+            # if vs_front.edge_position.new_value_available:
+            #     log_info_general("edge_front_sensor: {}".format(str(vs_front.edge_position.value)))
             #
-            # if vs_rear.edge_is_in_position.new_value_available:
-            #     if vs_rear.edge_position.value < 0 <= vs_front.edge_position.last_value:
-            #         plc_handler.stop_film = False
-            #         mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
-            #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_pictureIsInPosition, ef.bool2Int(vs_rear.edge_is_in_position.value))
+            # if vs_rear.edge_position.new_value_available:
+            #     log_info_general("edge_rear_sensor: {}".format(str(vs_rear.edge_position.value)))
 
             if vs_front.edge_status.new_value_available:
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getEdgeStatus, vs_front.edge_status.value)
@@ -1175,53 +655,17 @@ with contextlib.ExitStack() as stack:
             if vs_rear.edge_status.new_value_available:
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getEdgeStatus, vs_rear.edge_status.value)
 
-            if film_move_direction.value == 1:
-                if vs_front.edge_position.new_value_available:
-                    if vs_front.edge_position.value < 0 and not vs_front_looking_for_picture_position.value:
-                        vs_front_looking_for_picture_position.value = True
-                        plc_handler.stop_film = False
-                        mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
+            if vs_front.fps.new_value_available:
+                mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsCtrl_vsFront_fps, vs_front.fps.value)
+                vs_front.fps.reset()
 
-                    if vs_front.edge_position.value >= (vs_front.stop_position - vs_front.stop_offset_compensation) and vs_front_looking_for_picture_position.value:
-                        send_stop_motor_time = time.time()
-                        log_info_general("#######################################################################################################")
-                        log_info_general("FRONT EDGE IN STOP-POSITION - send stop-command to plc")
-                        log_info_general("edge-position_front: " + str(vs_front.edge_position.value))
-                        log_info_general("edge-position_rear: " + str(vs_rear.edge_position.value))
-                        plc_handler.stop_film = True
-                        mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 1)
-                        log_info_general("#######################################################################################################")
-                        vs_front_looking_for_picture_position.value = False
+            if vs_rear.fps.new_value_available:
+                mqtt.setMqttValue(mqtt.pTopics_vsController.get_vsCtrl_vsRear_fps, vs_rear.fps.value)
+                vs_rear.fps.reset()
 
-                    if vs_front_looking_for_picture_position.new_value_available:
-                        log_info_general("LookingForEdge: " + str(vs_front_looking_for_picture_position.value))
-
-            if film_move_direction.value == 2:
-                if vs_rear.edge_position.new_value_available:
-                    if vs_rear.edge_position.value < 0 and not vs_rear_looking_for_picture_position.value:
-                        vs_rear_looking_for_picture_position.value = True
-                        plc_handler.stop_film = False
-                        mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
-
-                    if vs_rear.edge_position.value >= (vs_rear.stop_position - vs_rear.stop_offset_compensation) and vs_rear_looking_for_picture_position.value:
-                        send_stop_motor_time = time.time()
-                        log_info_general("#######################################################################################################")
-                        log_info_general("REAR EDGE IN STOP-POSITION - send stop-command to plc")
-                        log_info_general("edge-position_front: " + str(vs_front.edge_position.value))
-                        log_info_general("edge-position_rear: " + str(vs_rear.edge_position.value))
-                        plc_handler.stop_film = True
-                        mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 1)
-                        log_info_general("#######################################################################################################")
-                        vs_rear_looking_for_picture_position.value = False
-
-                    if vs_rear_looking_for_picture_position.new_value_available:
-                        log_info_general("LookingForEdge: " + str(vs_rear_looking_for_picture_position.value))
-
-            if film_move_direction.value == 0 and film_move_direction.last_value > 0:
-                pass
-
-            if vs_front_send_mqtt_image.value:
-                log_info_general("send vsFront image over MQTT")
+            if vs_front_send_mqtt_image:
+                if not vs_front.enable_live_view:
+                    log_info_general("send vsFront image over MQTT")
                 if not showOutput:
                     vs_front.create_image_info()
                 vs_front.create_image_info_jpg()
@@ -1232,10 +676,11 @@ with contextlib.ExitStack() as stack:
                 if vs_front.img_height.new_value_available:
                     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageHeight, vs_front.img_height.value)
                     vs_front.img_height.reset()
-                vs_front_send_mqtt_image.value = False
+                vs_front_send_mqtt_image = False
 
-            if vs_rear_send_mqtt_image.value:
-                log_info_general("send vsRear image over MQTT")
+            if vs_rear_send_mqtt_image:
+                if not vs_rear.enable_live_view:
+                    log_info_general("send vsRear image over MQTT")
                 if not showOutput:
                     vs_rear.create_image_info()
                 vs_rear.create_image_info_jpg()
@@ -1246,9 +691,9 @@ with contextlib.ExitStack() as stack:
                 if vs_rear.img_height.new_value_available:
                     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, vs_rear.img_height.value)
                     vs_rear.img_height.reset()
-                vs_rear_send_mqtt_image.value = False
+                vs_rear_send_mqtt_image = False
 
-            if vs_front_send_mqtt_values.value:
+            if vs_front_send_mqtt_values:
                 vs_front_stop_offset = vs_front.edge_position.value - vs_front.stop_position
                 log_info_general("#######################################################################################################")
                 log_info_general("stop-delay-time: " + str((time.time() - send_stop_motor_time) * 1000))
@@ -1257,12 +702,15 @@ with contextlib.ExitStack() as stack:
                 vs_front_statistics = compute_stats(vs_front.stat_image_full)
                 if showOutput and vs_front.stat_image_full is not None:
                     cv2.imshow("Sensor-Front - Stat-Image", vs_front.stat_image_full)
-                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getExposureTimeLive, vs_front.exposure_time.value)
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition, vs_front.edge_position.value)
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_edgePosition, vs_rear.edge_position.value)
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getExposureTimeLive, vs_front.exposure_time.value)
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_image_statistics, str(vs_front_statistics))
-                vs_front_send_mqtt_values.value = False
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition_pip, vs_front.edge_position.value)
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_edgePosition_pip, vs_rear.edge_position.value)
+                vs_front_send_mqtt_values = False
 
-            if vs_rear_send_mqtt_values.value:
+            if vs_rear_send_mqtt_values:
                 vs_rear_stop_offset = vs_rear.edge_position.value - vs_rear.stop_position
                 log_info_general("vsRear stop-Offset: " + str(vs_rear_stop_offset))
                 log_info_general("#######################################################################################################")
@@ -1270,13 +718,100 @@ with contextlib.ExitStack() as stack:
                 vs_rear_statistics = compute_stats(vs_rear.stat_image_full)
                 if showOutput and vs_rear.stat_image_full is not None:
                     cv2.imshow("Sensor-Rear - Stat-Image", vs_rear.stat_image_full)
-                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getExposureTimeLive, vs_rear.exposure_time.value)
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition, vs_front.edge_position.value)
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_edgePosition, vs_rear.edge_position.value)
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getExposureTimeLive, vs_rear.exposure_time.value)
                 mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_image_statistics, str(vs_rear_statistics))
-                vs_rear_send_mqtt_values.value = False
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition_pip, vs_front.edge_position.value)
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_edgePosition_pip, vs_rear.edge_position.value)
+                vs_rear_send_mqtt_values = False
 
             if debug_vs:
                 pass
+
+        if film_move_direction.value == 0 and film_move_direction.previous_value > 0:
+            log_info_general("Motor Stopped...")
+            vs_front_send_mqtt_image = True
+            vs_rear_send_mqtt_image = True
+            vs_front_send_mqtt_values = True
+            vs_rear_send_mqtt_values = True
+
+        # if move_command.value == 0 and move_command.previous_value > 0:
+        #     log_info_general("receive moveCommand={}".format(str(move_command.value)))
+        #     vs_front_send_mqtt_image = True
+        #     vs_rear_send_mqtt_image = True
+        #     vs_front_send_mqtt_values = True
+        #     vs_rear_send_mqtt_values = True
+
+
+        if vs_front.edge_position.value > vs_front_last_mqtt_position_value + mqtt_report_position_steps:
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition, vs_front.edge_position.value)
+            vs_front_last_mqtt_position_value = vs_front.edge_position.value
+
+        if vs_rear.edge_position.value < 0 and not vs_rear_looking_for_picture_position.value:
+            vs_rear_looking_for_picture_position.value = True
+            plc_handler.stop_film = False
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
+
+        if vs_front.edge_position.value < 0 and not vs_front_looking_for_picture_position.value:
+            vs_front_looking_for_picture_position.value = True
+            plc_handler.stop_film = False
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
+            vs_front_last_mqtt_position_value = vs_front.edge_position.value
+
+        if film_move_direction.value == 1:
+            if vs_rear.edge_position.new_value_available:
+                if 0 < vs_rear.edge_position.value <= (vs_rear.stop_position + vs_rear.stop_offset_compensation) and vs_rear_looking_for_picture_position.value:
+                    send_stop_motor_time = time.time()
+                    log_info_general("#######################################################################################################")
+                    log_info_general("REAR EDGE IN STOP-POSITION - send stop-command to plc")
+                    log_info_general("edge-position_front: " + str(vs_front.edge_position.value))
+                    log_info_general("edge-position_rear: " + str(vs_rear.edge_position.value))
+                    plc_handler.stop_film = True
+                    mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 1)
+                    log_info_general("#######################################################################################################")
+                    vs_rear_looking_for_picture_position.value = False
+
+                if vs_front.edge_position.value >= (vs_front.stop_position - vs_front.stop_offset_compensation) and vs_front_looking_for_picture_position.value:
+                    send_stop_motor_time = time.time()
+                    log_info_general("#######################################################################################################")
+                    log_info_general("FRONT EDGE IN STOP-POSITION - send stop-command to plc")
+                    log_info_general("edge-position_front: " + str(vs_front.edge_position.value))
+                    log_info_general("edge-position_rear: " + str(vs_rear.edge_position.value))
+                    plc_handler.stop_film = True
+                    mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 1)
+                    log_info_general("#######################################################################################################")
+                    vs_front_looking_for_picture_position.value = False
+
+        if film_move_direction.value == 2:
+            if vs_rear.edge_position.new_value_available:
+                if vs_rear.edge_position.value >= (vs_rear.stop_position - vs_rear.stop_offset_compensation) and vs_rear_looking_for_picture_position.value:
+                    send_stop_motor_time = time.time()
+                    log_info_general("#######################################################################################################")
+                    log_info_general("REAR EDGE IN STOP-POSITION - send stop-command to plc")
+                    log_info_general("edge-position_front: " + str(vs_front.edge_position.value))
+                    log_info_general("edge-position_rear: " + str(vs_rear.edge_position.value))
+                    plc_handler.stop_film = True
+                    mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 1)
+                    log_info_general("#######################################################################################################")
+                    vs_rear_looking_for_picture_position.value = False
+
+                if 0 < vs_front.edge_position.value <= (vs_front.stop_position + vs_front.stop_offset_compensation) and vs_front_looking_for_picture_position.value:
+                    send_stop_motor_time = time.time()
+                    log_info_general("#######################################################################################################")
+                    log_info_general("FRONT EDGE IN STOP-POSITION - send stop-command to plc")
+                    log_info_general("edge-position_front: " + str(vs_front.edge_position.value))
+                    log_info_general("edge-position_rear: " + str(vs_rear.edge_position.value))
+                    plc_handler.stop_film = True
+                    mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 1)
+                    log_info_general("#######################################################################################################")
+                    vs_front_looking_for_picture_position.value = False
+
+        if vs_rear_looking_for_picture_position.new_value_available:
+            log_info_general("LookingForEdge: " + str(vs_rear_looking_for_picture_position.value))
+
+        if vs_front_looking_for_picture_position.new_value_available:
+            log_info_general("LookingForEdge: " + str(vs_front_looking_for_picture_position.value))
 
         if write_init_config:
             write_init_config_to_file()
@@ -1285,10 +820,6 @@ with contextlib.ExitStack() as stack:
         if write_settings_config:
             write_settings_config_to_file()
             write_settings_config = False
-
-        vs_front_live_view_enabled.reset()
-        vs_rear_live_view_enabled.reset()
-        vs_enable_low_contrast_mode.reset()
 
         vs_front.edge_position.reset()
         vs_rear.edge_position.reset()
@@ -1299,8 +830,8 @@ with contextlib.ExitStack() as stack:
         vs_front.edge_is_in_position.reset()
         vs_rear.edge_is_in_position.reset()
 
-        vs_front.autoFocusEnabled.reset()
-        vs_rear.autoFocusEnabled.reset()
+        # vs_front.autoFocusEnabled.reset()
+        # vs_rear.autoFocusEnabled.reset()
 
         vs_front.exposure_time.reset()
         vs_rear.exposure_time.reset()
@@ -1308,9 +839,6 @@ with contextlib.ExitStack() as stack:
 
         vs_front.edge_status.reset()
         vs_rear.edge_status.reset()
-
-        vs_front_send_mqtt_image.reset()
-        vs_rear_send_mqtt_image.reset()
 
         film_move_direction.reset()
         move_command.reset()
@@ -1322,6 +850,6 @@ with contextlib.ExitStack() as stack:
             if cv2.waitKey(1) == ord('q'):
                 break
 
-        time.sleep(0.001)
+        time.sleep(0.0001)
 
         # print("looptime: " + str(time.time() - startTime))

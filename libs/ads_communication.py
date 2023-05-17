@@ -14,13 +14,6 @@ class AdsHandler(threading.Thread):
     def setLogger(self, logger):
         self._externalLogger = logger
 
-    def setAdsValue(self, mqtt_item, value):
-        result = self._client_mqtt.publish(mqtt_item.address, value, retain=mqtt_item.retain, qos=mqtt_item.qos)
-        if result.rc == mqtt.MQTT_ERR_QUEUE_SIZE:
-            raise ValueError('Message is not queued due to ERR_QUEUE_SIZE')
-        if mqtt_item.log_output:
-            self._logInfoMqttPublishMessage(mqtt_item.address, value, result.rc)
-
     @property
     def stop_film(self):
         return self.plc.read_by_name("",pyads.PLCTYPE_BOOL, handle=self._stop_film_handler)

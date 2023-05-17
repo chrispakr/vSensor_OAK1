@@ -23,3 +23,40 @@ class Ticker:
         dt = time.perf_counter() - self.t
         self.t = time.perf_counter()
         return 1000 * dt
+
+
+class ValueHandler:
+    def __init__(self, value=None):
+        self._value = value
+        self._last_value = value
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, val):
+        self._last_value = self._value
+        self._value = val
+
+    @property
+    def previous_value(self):
+        return self._last_value
+
+    @previous_value.setter
+    def previous_value(self, val):
+        pass
+
+    @property
+    def new_value_available(self):
+        if self._value != self._last_value:
+            return True
+        else:
+            return False
+
+    @new_value_available.setter
+    def new_value_available(self, val):
+        pass
+
+    def reset(self):
+        self._last_value = self._value

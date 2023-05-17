@@ -13,6 +13,8 @@ buildDate=$(date +"%Y-%m-%d_%H%M")
 filename="${programName}_${buildDate}.${fileExtension}"
 deployFile="${deployPath}/${filename}"
 
+systemctl start systemd-timesyncd.service
+
 HOST="web171.dogado.net"
 USER="h118407_sw_update"
 PASSWD="wMLNKugwDc3WKwghGmELAk2Fj"
@@ -30,8 +32,8 @@ echo "############################################"
 echo "create binary package"
 echo "############################################"
 
-#source "$fullVenvPath"
-#pyinstaller --clean -y main.spec
+source "$fullVenvPath"
+pyinstaller --clean -y vSensor3.spec
 
 echo "############################################"
 echo "create binary package finished"
