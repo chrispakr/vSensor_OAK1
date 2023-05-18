@@ -20,6 +20,13 @@ if platform.system() == "Linux":
     showOutput = False
 
 
+class VisionSensorOperationMode:
+    def __init__(self):
+        self.auto = 0
+        self.front_sensor = 1
+        self.rear_sensor = 2
+        self.both_sensors = 3
+
 class VisionSensor():
     fps_report_time = 3
     _contrast_pic_height = 20
@@ -28,7 +35,7 @@ class VisionSensor():
     def __init__(self, device_info, is_front_sensor, vs_name, fps, logger,
                  capture_width=860, capture_height=600, preview_width=800,
                  edge_detection_slope_lcm=30, edge_detection_slope_std=50,
-                 contrast_offset_lcm=40, contrast_offset_std=100):
+                 lcm_contrast_offset=40, std_contrast_offset=100):
         # general Variables
         super().__init__()
         self.logger = logger
@@ -44,7 +51,7 @@ class VisionSensor():
         self.film_type_is_negative = True
         self.edge_position = ValueHandler(-1)
         self._total_edge_slope = 0
-        self.lcm_enabled = False
+        self._enabled_lcm = False
         self.edge_position_tile_diff = 0
         self.edge_detected = ValueHandler(False)
         self.edge_is_in_position = ValueHandler(False)
@@ -60,10 +67,10 @@ class VisionSensor():
         self.capture_height = capture_height
         self.set_fps = fps
         self.preview_width = preview_width
-        self.edge_detection_slope_lcm = edge_detection_slope_lcm
-        self.edge_detection_slope_std = edge_detection_slope_std
-        self.contrast_offset_lcm = contrast_offset_lcm
-        self.contrast_offset_std = contrast_offset_std
+        self._lcm_slope = edge_detection_slope_lcm
+        self._std_slope = edge_detection_slope_std
+        self._lcm_contrast_offset = lcm_contrast_offset
+        self._std_contrast_offset = std_contrast_offset
 
         # processing image variables
         self.input_image_data = None
@@ -86,7 +93,7 @@ class VisionSensor():
         self._arr_slope_total_mean = deque(maxlen=40)
         self._slope_total_mean = 0
         self._new_edge_detected = 0
-        self._slope_diff = 0
+        # self._slope_diff = 0
         self._slope_diff_rising = 0
         self._slope_diff_falling = 0
 
@@ -132,7 +139,7 @@ class VisionSensor():
         self.enable_live_view = False
 
         self.pipeline = None
-        self.get_pipeline()
+        self._get_pipeline()
         self.device = dai.Device(self.pipeline, self.device_info)
         self.image_edge_queue = self.device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
         self.camera_control_queue = self.device.getInputQueue('control')
@@ -188,8 +195,34 @@ class VisionSensor():
         self._image_center_position = value
         self._log_info_vsensor("change image_center_position to: " + str(self._image_center_position))
 
+    @property
+    def lcm_slope(self):
+        return self._lcm_slope
 
-    def get_pipeline(self):
+    @lcm_slope.setter
+    def lcm_slope(self, value):
+        self._lcm_slope = value
+        self._log_info_vsensor("set lcm_slope to: " + str(self._lcm_slope))
+
+    @property
+    def lcm_contrast_offset(self):
+        return self._lcm_contrast_offset
+
+    @lcm_contrast_offset.setter
+    def lcm_contrast_offset(self, value):
+        self._lcm_contrast_offset = value
+        self._log_info_vsensor("set lcm_contrast_offset to: " + str(self._lcm_contrast_offset))
+
+    @property
+    def enable_low_contrast_mode(self):
+        return self._lcm_contrast_offset
+
+    @enable_low_contrast_mode.setter
+    def enable_low_contrast_mode(self, value):
+        self._enabled_lcm = value
+        self._log_info_vsensor("set enable_low_contrast_mode to: " + str(self._enabled_lcm))
+
+    def _get_pipeline(self):
         # Create pipeline
         self.pipeline = dai.Pipeline()
 
@@ -261,10 +294,10 @@ class VisionSensor():
             self._slope_total_mean = sum(self._arr_slope_total_mean) // len(self._arr_slope_total_mean)
             self._slope_diff_rising = self._total_edge_slope - min(self._arr_slope_total_mean)
             self._slope_diff_falling = self._slope_total_mean - max(self._arr_slope_total_mean)
-            if self._is_front_sensor:
-                self._slope_diff = self._total_edge_slope - self._slope_total_mean
-                if self._slope_total_mean > 0:
-                    slope_div = self._total_edge_slope / self._slope_total_mean
+            # if self._is_front_sensor:
+            #     self._slope_diff = self._total_edge_slope - self._slope_total_mean
+            #     if self._slope_total_mean > 0:
+            #         slope_div = self._total_edge_slope / self._slope_total_mean
 
             if (self._total_edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
                 # if self._is_front_sensor:
@@ -278,11 +311,11 @@ class VisionSensor():
                 self._new_edge_detected = 0
                 self._arr_slope_total_mean.clear()
                 self._arr_slope_total_mean.append(self._total_edge_slope)
-            if self.lcm_enabled:
-                if self._total_edge_slope > self.edge_detection_slope_lcm:
+            if self._enabled_lcm:
+                if self._total_edge_slope > self._lcm_slope:
                     self.edge_position.value = (self._left_edge_position + self._right_edge_position) // 2
             else:
-                if self._total_edge_slope > self.edge_detection_slope_std:
+                if self._total_edge_slope > self._std_slope:
                     self.edge_position.value = (self._left_edge_position + self._right_edge_position) // 2
 
             if self.edge_position.value > (self._contrast_pic_height + self._contrast_pic_edge_offset):
@@ -304,9 +337,9 @@ class VisionSensor():
 
             self._edge_status = 0
 
-            if self.lcm_enabled:
+            if self._enabled_lcm:
                 if self.film_type_is_negative:
-                    if self._in_pic_median_total + self.contrast_offset_lcm < self._out_pic_median_total:
+                    if self._in_pic_median_total + self._lcm_contrast_offset < self._out_pic_median_total:
                         self.edge_detected.value = True
                         self._edge_status = 1
                     else:
@@ -314,7 +347,7 @@ class VisionSensor():
                         self.edge_position.value = -1
 
                 else:
-                    if self._in_pic_median_total + self.contrast_offset_lcm > self._out_pic_median_total:
+                    if self._in_pic_median_total + self._lcm_contrast_offset > self._out_pic_median_total:
                         self.edge_detected.value = True
                         self._edge_status = 1
                     else:
@@ -322,14 +355,14 @@ class VisionSensor():
                         self.edge_position.value = -1
             else:
                 if self.film_type_is_negative:
-                    if self._in_pic_median_total + self.contrast_offset_std < self._out_pic_median_total:
+                    if self._in_pic_median_total + self._std_contrast_offset < self._out_pic_median_total:
                         self.edge_detected.value = True
                         self._edge_status = 1
                     else:
                         self.edge_detected.value = False
                         self.edge_position.value = -1
                 else:
-                    if self._in_pic_median_total + self.contrast_offset_std > self._out_pic_median_total:
+                    if self._in_pic_median_total + self._std_contrast_offset > self._out_pic_median_total:
                         self.edge_detected.value = True
                         self._edge_status = 1
                     else:
@@ -441,17 +474,17 @@ class VisionSensor():
         self.camCtrl.setAutoFocusTrigger()
         self.camera_control_queue.send(self.camCtrl)
 
-    @property
-    def stop_motor(self):
-        if self._stop_motor:
-            self._stop_motor = False
-            return True
-        else:
-            return False
-
-    @stop_motor.setter
-    def stop_motor(self, value):
-        pass
+    # @property
+    # def stop_motor(self):
+    #     if self._stop_motor:
+    #         self._stop_motor = False
+    #         return True
+    #     else:
+    #         return False
+    #
+    # @stop_motor.setter
+    # def stop_motor(self, value):
+    #     pass
 
     @property
     def focus_position(self):
