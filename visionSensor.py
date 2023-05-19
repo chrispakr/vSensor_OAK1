@@ -4,6 +4,7 @@ from collections import deque
 import depthai as dai
 import numpy as np
 from turbojpeg import TurboJPEG
+from enum import Enum
 import platform
 import base64
 import cv2
@@ -20,14 +21,13 @@ if platform.system() == "Linux":
     showOutput = False
 
 
-class VisionSensorOperationMode:
-    def __init__(self):
-        self.auto = 0
-        self.front_sensor = 1
-        self.rear_sensor = 2
-        self.both_sensors = 3
+class VisionSensorOperationMode(Enum):
+        AUTO = 0
+        FRONT_SENSOR = 1
+        REAR_SENSOR = 2
+        BOTH_SENSORS = 3
 
-class VisionSensor():
+class VisionSensor:
     fps_report_time = 3
     _contrast_pic_height = 20
     _contrast_pic_edge_offset = 10
@@ -71,6 +71,7 @@ class VisionSensor():
         self._std_slope = edge_detection_slope_std
         self._lcm_contrast_offset = lcm_contrast_offset
         self._std_contrast_offset = std_contrast_offset
+        self.lcm_statistics = None
 
         # processing image variables
         self.input_image_data = None
@@ -339,14 +340,15 @@ class VisionSensor():
 
             if self._enabled_lcm:
                 if self.film_type_is_negative:
+                    self.lcm_statistics = [self._total_edge_slope, self._out_pic_median_total - self._in_pic_median_total]
                     if self._in_pic_median_total + self._lcm_contrast_offset < self._out_pic_median_total:
                         self.edge_detected.value = True
                         self._edge_status = 1
                     else:
                         self.edge_detected.value = False
                         self.edge_position.value = -1
-
                 else:
+                    self.lcm_statistics = [self._total_edge_slope, self._in_pic_median_total - self._out_pic_median_total]
                     if self._in_pic_median_total + self._lcm_contrast_offset > self._out_pic_median_total:
                         self.edge_detected.value = True
                         self._edge_status = 1
@@ -395,7 +397,7 @@ class VisionSensor():
                 self.fps_elapsed_time = datetime.now()
                 # self._log_info_vsensor("FPS: {}".format(str(self.fps)))
                 self._fps_counter = 0
-            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
+            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time.value:
                 self.exposure_time.value = int(self.input_image_data.getExposureTime().total_seconds() * 1000000)
             if self.input_image_data.getLensPosition() != self._lens_position:
                 self._lens_position = self.input_image_data.getLensPosition()
