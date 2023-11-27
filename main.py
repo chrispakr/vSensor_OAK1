@@ -734,20 +734,22 @@ with contextlib.ExitStack() as stack:
             vs_front_send_mqtt_values = True
             vs_rear_send_mqtt_values = True
 
-        if vs_front.edge_position.value > vs_front_last_mqtt_position_value + mqtt_report_position_steps:
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition, vs_front.edge_position.value)
-            vs_front_last_mqtt_position_value = vs_front.edge_position.value
+        if film_move_direction.value > 0:
 
-        if vs_rear.edge_position.value < 0 and not vs_rear_edge_detection_active.value:
-            vs_rear_edge_detection_active.value = True
-            plc_handler.stop_film = False
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
+            if vs_front.edge_position.value > vs_front_last_mqtt_position_value + mqtt_report_position_steps:
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_edgePosition, vs_front.edge_position.value)
+                vs_front_last_mqtt_position_value = vs_front.edge_position.value
 
-        if vs_front.edge_position.value < 0 and not vs_front_edge_detection_active.value:
-            vs_front_edge_detection_active.value = True
-            plc_handler.stop_film = False
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
-            vs_front_last_mqtt_position_value = vs_front.edge_position.value
+            if vs_rear.edge_position.value < 0 and not vs_rear_edge_detection_active.value:
+                vs_rear_edge_detection_active.value = True
+                plc_handler.stop_film = False
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
+
+            if vs_front.edge_position.value < 0 and not vs_front_edge_detection_active.value:
+                vs_front_edge_detection_active.value = True
+                plc_handler.stop_film = False
+                mqtt.setMqttValue(mqtt.pTopics_vsController.set_pictureIsInPosition, 0)
+                vs_front_last_mqtt_position_value = vs_front.edge_position.value
 
         if film_move_direction.value == 1:
             if vs_operation_mode == vs_op_modes.REAR_SENSOR.value \
