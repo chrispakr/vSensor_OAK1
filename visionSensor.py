@@ -1,5 +1,5 @@
 from datetime import datetime
-from libs.functions import ValueHandler
+from libs.functions import ValueHandler, ValueHandlerInt
 from collections import deque
 import depthai as dai
 import numpy as np
@@ -47,20 +47,22 @@ class VisionSensor:
         self.name = vs_name
         self.device_info = device_info
         self._is_front_sensor = is_front_sensor
-        # self.is_main_sensor = is_front_sensor
         self.film_type_is_negative = True
-        self.edge_position = ValueHandler(-1)
         self._total_edge_slope = 0
         self._enabled_lcm = False
         self.edge_position_tile_diff = 0
-        self.edge_detected = ValueHandler(False)
-        self.edge_is_in_position = ValueHandler(False)
-        self.edge_status = ValueHandler(0)
+
+        self.edge_position = 0
+        self._edge_position = 0
+        self.edge_state = 0
+        self._edge_detected = False
+        self._edge_in_position = False
+
         self._image_center_position = 450
         self.proc_image_width = 400
         self._stop_offset_compensation = 8
         self._edge_detection_range = 30
-        self._edge_status = 0
+        # self._edge_status = 0
         self._stop_motor = False
 
         self.capture_width = capture_width
@@ -94,7 +96,6 @@ class VisionSensor:
         self._arr_slope_total_mean = deque(maxlen=40)
         self._slope_total_mean = 0
         self._new_edge_detected = 0
-        # self._slope_diff = 0
         self._slope_diff_rising = 0
         self._slope_diff_falling = 0
 
@@ -105,13 +106,13 @@ class VisionSensor:
         # preview image variables
         self._img_width = 0
         self._img_height = 0
-        self.img_width = ValueHandler(0)
-        self.img_height = ValueHandler(0)
+        self.img_width = 0
+        self.img_height = 0
 
         # fps variables
         self.fps_elapsed_time = datetime.now()
         self.fps_jpg_image_time = datetime.now()
-        self.fps = ValueHandler(0)
+        self.fps = 0
         self.fps_jpg_image = 0
         self._fps_counter = 0
         self._fps_counter_jpg_image = 0
@@ -127,7 +128,7 @@ class VisionSensor:
 
         # camera control variables
         self.camCtrl = None
-        self.exposure_time = ValueHandler(0)
+        self.exposure_time = 0
 
         self.af_start_time = datetime.now()
         self.autoFocusEnabled = False
@@ -137,7 +138,7 @@ class VisionSensor:
         self.autoExposureEnabled = False
         self.autoExposureFinished = False
 
-        self.enable_live_view = False
+        # self.enable_live_view = False
 
         self.pipeline = None
         self._get_pipeline()
@@ -157,8 +158,6 @@ class VisionSensor:
         self.line_color_stop_position = (32, 43, 255)
         self.line_color_center_position = (163, 136, 22)
         self.line_color_stop_offset = (170, 102, 255)
-
-
 
     @property
     def stop_position(self):
@@ -265,7 +264,7 @@ class VisionSensor:
             self.image_info_base64 = None
             # self._log_info_vsensor("capture-time: " + str(time.time() - self.capture_time))
             self.capture_time = time.time()
-            # self.edge_position.value = -1
+            # self._edge_position.value = -1
             self.raw_input_image = self.input_image_data.getCvFrame()
             (full_image_height, full_image_width) = self.raw_input_image.shape[:2]
             if self._image_center_position < self.preview_width // 2:
@@ -314,13 +313,13 @@ class VisionSensor:
                 self._arr_slope_total_mean.append(self._total_edge_slope)
             if self._enabled_lcm:
                 if self._total_edge_slope > self._lcm_slope:
-                    self.edge_position.value = (self._left_edge_position + self._right_edge_position) // 2
+                    self._edge_position = (self._left_edge_position + self._right_edge_position) // 2
             else:
                 if self._total_edge_slope > self._std_slope:
-                    self.edge_position.value = (self._left_edge_position + self._right_edge_position) // 2
+                    self._edge_position = (self._left_edge_position + self._right_edge_position) // 2
 
-            if self.edge_position.value > (self._contrast_pic_height + self._contrast_pic_edge_offset):
-                _in_pic_contrast_max_pos = self.edge_position.value - self._contrast_pic_edge_offset
+            if self._edge_position > (self._contrast_pic_height + self._contrast_pic_edge_offset):
+                _in_pic_contrast_max_pos = self._edge_position - self._contrast_pic_edge_offset
                 _in_pic_contrast_min_pos = _in_pic_contrast_max_pos - self._contrast_pic_height
                 _in_pic_contrast_image_left = self.np_image_tile_left[_in_pic_contrast_min_pos:_in_pic_contrast_max_pos, 0:self.proc_image_width]
                 _in_pic_contrast_image_right = self.np_image_tile_right[_in_pic_contrast_min_pos:_in_pic_contrast_max_pos, 0:self.proc_image_width]
@@ -328,7 +327,7 @@ class VisionSensor:
                 self._in_pic_median_right = np.median(_in_pic_contrast_image_right)
                 self._in_pic_median_total = self._in_pic_median_left + self._in_pic_median_right
 
-                _out_pic_contrast_min_pos = self.edge_position.value + self._contrast_pic_edge_offset
+                _out_pic_contrast_min_pos = self._edge_position + self._contrast_pic_edge_offset
                 _out_pic_contrast_max_pos = _out_pic_contrast_min_pos + self._contrast_pic_height
                 _out_pic_contrast_image_left = self.np_image_tile_left[_out_pic_contrast_min_pos:_out_pic_contrast_max_pos, 0:self.proc_image_width]
                 _out_pic_contrast_image_right = self.np_image_tile_right[_out_pic_contrast_min_pos:_out_pic_contrast_max_pos, 0:self.proc_image_width]
@@ -336,69 +335,62 @@ class VisionSensor:
                 self._out_pic_median_right = np.median(_out_pic_contrast_image_right)
                 self._out_pic_median_total = self._out_pic_median_left + self._out_pic_median_right
 
-            self._edge_status = 0
+            if not self._enabled_lcm:
+                if self.film_type_is_negative:
+                    if self._in_pic_median_total + self._std_contrast_offset < self._out_pic_median_total:
+                        self._edge_detected = True
+                    else:
+                        self._edge_detected = False
+                else:
+                    if self._in_pic_median_total + self._std_contrast_offset > self._out_pic_median_total:
+                        self._edge_detected = True
+                    else:
+                        self._edge_detected = False
 
             if self._enabled_lcm:
                 if self.film_type_is_negative:
                     self.lcm_statistics = [self._total_edge_slope, self._out_pic_median_total - self._in_pic_median_total]
                     if self._in_pic_median_total + self._lcm_contrast_offset < self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
+                        self._edge_detected = True
                     else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
+                        self._edge_detected = False
                 else:
                     self.lcm_statistics = [self._total_edge_slope, self._in_pic_median_total - self._out_pic_median_total]
                     if self._in_pic_median_total + self._lcm_contrast_offset > self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
+                        self._edge_detected = True
                     else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
+                        self._edge_detected = False
+
+            if (self._stop_position - (self._edge_detection_range//2)) < self._edge_position < (self._stop_position + (self._edge_detection_range // 2)):
+                self._edge_in_position = True
             else:
-                if self.film_type_is_negative:
-                    if self._in_pic_median_total + self._std_contrast_offset < self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
-                    else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
-                else:
-                    if self._in_pic_median_total + self._std_contrast_offset > self._out_pic_median_total:
-                        self.edge_detected.value = True
-                        self._edge_status = 1
-                    else:
-                        self.edge_detected.value = False
-                        self.edge_position.value = -1
+                self._edge_in_position = False
 
-            if (self._stop_position - (self._edge_detection_range//2)) < self.edge_position.value < (self._stop_position + (self._edge_detection_range // 2)):
-                self.edge_is_in_position.value = True
-            else:
-                self.edge_is_in_position.value = False
+            if not self._edge_detected and not self._edge_in_position:
+                self.edge_state = 0
+                self.edge_position = -1
 
-            if self.edge_detected.value and self.edge_is_in_position.value:
-                self._edge_status = 2
+            if self._edge_detected and not self._edge_in_position:
+                self.edge_state = 1
+                self.edge_position = self._edge_position
 
-            self.edge_status.value = self._edge_status
+            if self._edge_detected and self._edge_in_position:
+                self.edge_state = 2
+                self.edge_position = self._edge_position
 
             # if self._is_front_sensor:
-            #     self._log_info_vsensor(
-            #         str(self._total_edge_slope) + " // " +
-            #         str(self._in_pic_median_total) + " // " +
-            #         str(self._out_pic_median_total) + " // " +
-            #         str(self._out_pic_median_total - self._in_pic_median_total)
-            #     )
+            #     print(self.edge_position, self._edge_position, self._edge_detected, self._edge_in_position, self.edge_state)
 
             self.captured_images += 1
             self._fps_counter += 1
 
             if (datetime.now() - self.fps_elapsed_time).seconds >= self.fps_report_time:
-                self.fps.value = self._fps_counter // self.fps_report_time
+                self.fps = self._fps_counter // self.fps_report_time
                 self.fps_elapsed_time = datetime.now()
                 # self._log_info_vsensor("FPS: {}".format(str(self.fps)))
                 self._fps_counter = 0
-            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time.value:
-                self.exposure_time.value = int(self.input_image_data.getExposureTime().total_seconds() * 1000000)
+            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
+                self.exposure_time = int(self.input_image_data.getExposureTime().total_seconds() * 1000000)
             if self.input_image_data.getLensPosition() != self._lens_position:
                 self._lens_position = self.input_image_data.getLensPosition()
                 self._log_info_vsensor("lens-position changed to: {}".format(self._lens_position))
@@ -410,7 +402,7 @@ class VisionSensor:
                     self.autoFocusEnabled = False
                     self.autoFocusFinished = True
             if self.autoExposureEnabled:
-                self._log_info_vsensor("exposureTime: {}".format(str(self.exposure_time.value)))
+                self._log_info_vsensor("exposureTime: {}".format(str(self.exposure_time)))
                 if (datetime.now() - self.ae_start_time).seconds > 2:
                     self.camCtrl = dai.CameraControl()
                     self.camCtrl.setAutoExposureLock(True)
@@ -426,9 +418,9 @@ class VisionSensor:
         if self.proc_image_centered is not None:
             self.np_image_info_edge_line = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
             self._img_height, self._img_width, dim = self.np_image_info_edge_line.shape
-            self.img_width.value = self._img_width
-            self.img_height.value = self._img_height
-            if self.edge_is_in_position.value:
+            self.img_width = self._img_width
+            self.img_height = self._img_height
+            if self.edge_state == 2:
                 line_color = self.line_color_green
             else:
                 line_color = self.line_color_orange
@@ -438,7 +430,7 @@ class VisionSensor:
             cv2.line(self.np_image_info_edge_line, (self._img_width - 50, self._stop_position-self.stop_offset_compensation), (self._img_width, self._stop_position-self.stop_offset_compensation), self.line_color_stop_offset, 2)
             cv2.line(self.np_image_info_edge_line, (0, self._stop_position - self.stop_offset_compensation), (50, self._stop_position - self.stop_offset_compensation),
                      self.line_color_stop_offset, 2)
-            cv2.line(self.np_image_info_edge_line, (0, self.edge_position.value), (self._img_width, self.edge_position.value), line_color, 2)
+            cv2.line(self.np_image_info_edge_line, (0, self._edge_position), (self._img_width, self._edge_position), line_color, 2)
             self.np_image_info_setup_lines = self.np_image_info_edge_line
             cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 - self.proc_image_width, 0),
                      (self._img_width // 2 - self.proc_image_width, self._img_height), self.line_color_proc_image, 1)
@@ -463,8 +455,8 @@ class VisionSensor:
     def calc_statistics(self):
         if self.np_image_tile_left is not None and self.np_image_tile_right is not None:
             tile_height, tile_width = self.np_image_tile_left.shape
-            stat_image_tile_left = self.np_image_tile_left[0:self.edge_position.value - 20, 0:tile_width]
-            stat_image_tile_right = self.np_image_tile_right[0:self.edge_position.value - 20, 0:tile_width]
+            stat_image_tile_left = self.np_image_tile_left[0:self._edge_position - 20, 0:tile_width]
+            stat_image_tile_right = self.np_image_tile_right[0:self._edge_position - 20, 0:tile_width]
             self.stat_image_full = np.concatenate((stat_image_tile_left, stat_image_tile_right), axis=1)
 
     def auto_focus_camera(self):
@@ -475,18 +467,6 @@ class VisionSensor:
         self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_PICTURE)
         self.camCtrl.setAutoFocusTrigger()
         self.camera_control_queue.send(self.camCtrl)
-
-    # @property
-    # def stop_motor(self):
-    #     if self._stop_motor:
-    #         self._stop_motor = False
-    #         return True
-    #     else:
-    #         return False
-    #
-    # @stop_motor.setter
-    # def stop_motor(self, value):
-    #     pass
 
     @property
     def focus_position(self):
