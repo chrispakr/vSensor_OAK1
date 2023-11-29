@@ -16,11 +16,51 @@ class AdsHandler(threading.Thread):
 
     @property
     def stop_film(self):
-        return self.plc.read_by_name("",pyads.PLCTYPE_BOOL, handle=self._stop_film_handler)
+        return self.plc.read_by_name("", pyads.PLCTYPE_BOOL, handle=self._ads_handler_stop_film)
 
     @stop_film.setter
     def stop_film(self, value):
-        self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._stop_film_handler)
+        self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._ads_handler_stop_film)
+
+    @property
+    def picture_in_position(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_BOOL, handle=self._ads_handler_picture_in_position)
+
+    @picture_in_position.setter
+    def picture_in_position(self, value):
+        self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._ads_handler_picture_in_position)
+
+    @property
+    def vs_front_edge_position(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_INT, handle=self._ads_handler_vs_front_edge_position)
+
+    @vs_front_edge_position.setter
+    def vs_front_edge_position(self, value):
+        self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_front_edge_position)
+
+    @property
+    def vs_rear_edge_position(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_INT, handle=self._ads_handler_vs_rear_edge_position)
+
+    @vs_rear_edge_position.setter
+    def vs_rear_edge_position(self, value):
+        self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_rear_edge_position)
+
+    @property
+    def vs_front_edge_state(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_INT, handle=self._ads_handler_vs_front_edge_state)
+
+    @vs_front_edge_state.setter
+    def vs_front_edge_state(self, value):
+        self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_front_edge_state)
+
+    @property
+    def vs_rear_edge_state(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_INT, handle=self._ads_handler_vs_rear_edge_state)
+
+    @vs_rear_edge_state.setter
+    def vs_rear_edge_state(self, value):
+        self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_rear_edge_state)
 
     def enableLogger(self, enable):
         self.loggerEnabled = enable
@@ -37,7 +77,7 @@ class AdsHandler(threading.Thread):
             else:
                 self._externalLogger.info(log_message)
 
-    def __init__(self, mqtt_broker_ip="192.168.0.5", external_logger=None, logger_enabled=True, client_type=None):
+    def __init__(self, external_logger=None, logger_enabled=True):
         threading.Thread.__init__(self)
 
         if external_logger is None:
@@ -60,4 +100,9 @@ class AdsHandler(threading.Thread):
         self.plc.open()
         self._logInfoAds("connected to PLC...")
 
-        self._stop_film_handler = self.plc.get_handle("MAIN.vs_stopFilm")
+        self._ads_handler_stop_film = self.plc.get_handle("AdsVars.vs_stopFilm")
+        self._ads_handler_picture_in_position = self.plc.get_handle("AdsVars.vs_filmIsInPosition")
+        self._ads_handler_vs_front_edge_position = self.plc.get_handle("AdsVars.vs_front_edge_position")
+        self._ads_handler_vs_rear_edge_position = self.plc.get_handle("AdsVars.vs_rear_edge_position")
+        self._ads_handler_vs_front_edge_state = self.plc.get_handle("AdsVars.vs_front_edge_state")
+        self._ads_handler_vs_rear_edge_state = self.plc.get_handle("AdsVars.vs_rear_edge_state")
