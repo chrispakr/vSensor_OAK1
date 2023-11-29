@@ -26,9 +26,10 @@ class Ticker:
 
 
 class ValueHandler:
-    def __init__(self, value=None):
+    def __init__(self, value):
         self._value = value
         self._last_value = value
+        self.new_value_available = False
 
     @property
     def value(self):
@@ -36,8 +37,13 @@ class ValueHandler:
 
     @value.setter
     def value(self, val):
-        self._last_value = self._value
-        self._value = val
+        if val is not None:
+            self._last_value = self._value
+            self._value = val
+            if self._value != self._last_value:
+                self.new_value_available = True
+            else:
+                self.new_value_available = False
 
     @property
     def previous_value(self):
@@ -58,5 +64,26 @@ class ValueHandler:
     def new_value_available(self, val):
         pass
 
-    def reset(self):
+    # def reset(self):
+    #     self._last_value = self._value
+
+
+class ValueHandlerInt:
+    def __init__(self, value=None):
+        self._value = value
+        self._last_value = value
+        self.new_value_available = False
+
+    # def __get__(self):
+    #     return int(self._value)
+
+    def __int__(self):
+        return int(self._value)
+
+    def __set__(self, value):
         self._last_value = self._value
+        self._value = value
+        if self._value != self._last_value:
+            self.new_value_available = True
+        else:
+            self.new_value_available = False
