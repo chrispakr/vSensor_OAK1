@@ -20,15 +20,8 @@ class AdsHandler(threading.Thread):
 
     @stop_film.setter
     def stop_film(self, value):
+        self._logInfoAds(f"set stop_film to: {value}")
         self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._ads_handler_stop_film)
-
-    @property
-    def picture_in_position(self):
-        return self.plc.read_by_name("", pyads.PLCTYPE_BOOL, handle=self._ads_handler_picture_in_position)
-
-    @picture_in_position.setter
-    def picture_in_position(self, value):
-        self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._ads_handler_picture_in_position)
 
     @property
     def vs_front_edge_position(self):
@@ -36,6 +29,7 @@ class AdsHandler(threading.Thread):
 
     @vs_front_edge_position.setter
     def vs_front_edge_position(self, value):
+        self._logInfoAds(f"set vs_front_edge_position to: {value}")
         self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_front_edge_position)
 
     @property
@@ -44,6 +38,7 @@ class AdsHandler(threading.Thread):
 
     @vs_rear_edge_position.setter
     def vs_rear_edge_position(self, value):
+        self._logInfoAds(f"set vs_rear_edge_position to: {value}")
         self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_rear_edge_position)
 
     @property
@@ -52,6 +47,7 @@ class AdsHandler(threading.Thread):
 
     @vs_front_edge_state.setter
     def vs_front_edge_state(self, value):
+        self._logInfoAds(f"set vs_front_edge_state to: {value}")
         self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_front_edge_state)
 
     @property
@@ -60,7 +56,26 @@ class AdsHandler(threading.Thread):
 
     @vs_rear_edge_state.setter
     def vs_rear_edge_state(self, value):
+        self._logInfoAds(f"set vs_rear_edge_state to: {value}")
         self.plc.write_by_name("", value, pyads.PLCTYPE_INT, handle=self._ads_handler_vs_rear_edge_state)
+
+    @property
+    def vs_front_slow_down_speed(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_BOOL, handle=self._ads_handler_vs_front_slow_down_speed)
+
+    @vs_front_slow_down_speed.setter
+    def vs_front_slow_down_speed(self, value):
+        self._logInfoAds(f"set vs_front_slow_down_speed to: {value}")
+        self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._ads_handler_vs_front_slow_down_speed)
+
+    @property
+    def vs_rear_slow_down_speed(self):
+        return self.plc.read_by_name("", pyads.PLCTYPE_BOOL, handle=self._ads_handler_vs_rear_slow_down_speed)
+
+    @vs_rear_slow_down_speed.setter
+    def vs_rear_slow_down_speed(self, value):
+        self._logInfoAds(f"set vs_rear_slow_down_speed to: {value}")
+        self.plc.write_by_name("", value, pyads.PLCTYPE_BOOL, handle=self._ads_handler_vs_rear_slow_down_speed)
 
     def enableLogger(self, enable):
         self.loggerEnabled = enable
@@ -94,15 +109,16 @@ class AdsHandler(threading.Thread):
 
             pyads.ads.add_route('5.71.85.220.1.1', "192.168.0.10")
 
-            pyads.add_route_to_plc("192.168.0.30.1.1", "192.168.0.30", "192.168.0.10", "admin", "geodyn2905", route_name="pi")
+            pyads.add_route_to_plc("192.168.0.30.1.1", "192.168.0.30", "192.168.0.10", "admin", "geodyn2905", route_name="vSensor")
 
         self.plc = pyads.Connection('5.71.85.220.1.1', pyads.PORT_TC3PLC1, "192.168.0.10")
         self.plc.open()
         self._logInfoAds("connected to PLC...")
 
         self._ads_handler_stop_film = self.plc.get_handle("AdsVars.vs_stopFilm")
-        self._ads_handler_picture_in_position = self.plc.get_handle("AdsVars.vs_filmIsInPosition")
         self._ads_handler_vs_front_edge_position = self.plc.get_handle("AdsVars.vs_front_edge_position")
         self._ads_handler_vs_rear_edge_position = self.plc.get_handle("AdsVars.vs_rear_edge_position")
         self._ads_handler_vs_front_edge_state = self.plc.get_handle("AdsVars.vs_front_edge_state")
         self._ads_handler_vs_rear_edge_state = self.plc.get_handle("AdsVars.vs_rear_edge_state")
+        self._ads_handler_vs_front_slow_down_speed = self.plc.get_handle("AdsVars.vs_front_slow_down_speed")
+        self._ads_handler_vs_rear_slow_down_speed = self.plc.get_handle("AdsVars.vs_rear_slow_down_speed")

@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from libs.functions import ValueHandler, ValueHandlerInt
 from collections import deque
@@ -54,9 +55,14 @@ class VisionSensor:
 
         self.edge_position = 0
         self._edge_position = 0
+        self._last_edge_position = 0
         self.edge_state = 0
         self._edge_detected = False
         self._edge_in_position = False
+        self._last_edge_in_position = False
+        self._slow_down_offset = 50
+        self.slow_down_speed = False
+        # self._slow_down_speed = False
 
         self._image_center_position = 450
         self.proc_image_width = 400
@@ -64,6 +70,13 @@ class VisionSensor:
         self._edge_detection_range = 30
         # self._edge_status = 0
         self._stop_motor = False
+
+        self._lens_position = 130
+
+        self._stop_position = 350
+        self._edge_in_range_min = self._stop_position - (self._edge_detection_range // 2)
+        self._edge_in_range_max = self._stop_position + (self._edge_detection_range // 2)
+
 
         self.capture_width = capture_width
         self.capture_height = capture_height
@@ -83,6 +96,7 @@ class VisionSensor:
         self.np_image_info_edge_line = None
         self.np_image_info_setup_lines = None
         self.proc_image_centered = None
+        self.image_ai = None
 
         self._left_edge_position = 0
         self._right_edge_position = 0
@@ -148,9 +162,6 @@ class VisionSensor:
 
         self.capture_time = time.time()
 
-        self._stop_position = 350
-        self._lens_position = 130
-
         self.line_color_red = (32, 43, 255)
         self.line_color_green = (0, 255, 0)
         self.line_color_orange = (0, 165, 255)
@@ -160,12 +171,23 @@ class VisionSensor:
         self.line_color_stop_offset = (170, 102, 255)
 
     @property
+    def slow_down_offset(self):
+        return self._slow_down_offset
+
+    @slow_down_offset.setter
+    def slow_down_offset(self, value):
+        self._slow_down_offset = value
+        self._log_info_vsensor("change slow_down_offset to: " + str(self._slow_down_offset))
+
+    @property
     def stop_position(self):
         return self._stop_position
 
     @stop_position.setter
     def stop_position(self, value):
         self._stop_position = value
+        self._edge_in_range_min = self._stop_position - (self._edge_detection_range // 2)
+        self._edge_in_range_max = self._stop_position + (self._edge_detection_range // 2)
         self._log_info_vsensor("change stop_position to: " + str(self._stop_position))
 
     @property
@@ -294,20 +316,12 @@ class VisionSensor:
             self._slope_total_mean = sum(self._arr_slope_total_mean) // len(self._arr_slope_total_mean)
             self._slope_diff_rising = self._total_edge_slope - min(self._arr_slope_total_mean)
             self._slope_diff_falling = self._slope_total_mean - max(self._arr_slope_total_mean)
-            # if self._is_front_sensor:
-            #     self._slope_diff = self._total_edge_slope - self._slope_total_mean
-            #     if self._slope_total_mean > 0:
-            #         slope_div = self._total_edge_slope / self._slope_total_mean
 
             if (self._total_edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
-                # if self._is_front_sensor:
-                #     self._log_info_vsensor("edge-diff (rising): {}".format(self._slope_diff))
                 self._new_edge_detected = 200
                 self._arr_slope_total_mean.clear()
                 self._arr_slope_total_mean.append(self._total_edge_slope)
             if (self._slope_total_mean - self._total_edge_slope) > 40 and self._new_edge_detected == 200:
-                # if self._is_front_sensor:
-                #     self._log_info_vsensor("edge-diff (falling): {}".format(self._slope_diff))
                 self._new_edge_detected = 0
                 self._arr_slope_total_mean.clear()
                 self._arr_slope_total_mean.append(self._total_edge_slope)
@@ -361,10 +375,18 @@ class VisionSensor:
                     else:
                         self._edge_detected = False
 
-            if (self._stop_position - (self._edge_detection_range//2)) < self._edge_position < (self._stop_position + (self._edge_detection_range // 2)):
+            if self._edge_in_range_min < self._edge_position < self._edge_in_range_max:
                 self._edge_in_position = True
             else:
                 self._edge_in_position = False
+
+            if self._edge_detected:
+                if (self._stop_position - self._slow_down_offset) < self._edge_position < self._edge_in_range_max:
+                    self.slow_down_speed = True
+                else:
+                    self.slow_down_speed = False
+            else:
+                self.slow_down_speed = False
 
             if not self._edge_detected and not self._edge_in_position:
                 self.edge_state = 0
@@ -378,8 +400,33 @@ class VisionSensor:
                 self.edge_state = 2
                 self.edge_position = self._edge_position
 
-            # if self._is_front_sensor:
-            #     print(self.edge_position, self._edge_position, self._edge_detected, self._edge_in_position, self.edge_state)
+            if self.edge_position > 20 and self._edge_in_position:
+                if self._edge_in_position is not self._last_edge_in_position:
+                    self.image_ai = self.raw_input_image[(self._edge_position - 20):(self._edge_position + 20), 0:full_image_width]
+                    self._last_edge_position = self._edge_position
+                    lst = os.listdir("aiOutput/edge_detected")
+                    cv2.imwrite("aiOutput/edge_detected/" + str(len(lst)) + ".jpg", self.image_ai)
+                    # self.image_ai = self.raw_input_image
+                    # print(str(self._left_edge_position) + " // " + str(self._right_edge_position))
+
+            self._last_edge_in_position = self._edge_in_position
+
+            # code to grab AI-Training-Images
+            # if self.edge_state == 0:
+            #     self._last_edge_position = 0
+            #     self.image_ai = self.raw_input_image[0:24, 0:full_image_width]
+            #     lst = os.listdir("aiOutput/no_edge")
+            #     cv2.imwrite("aiOutput/no_edge/" + str(len(lst)) + ".jpg", self.image_ai)
+            #
+            # if self.edge_state == 1:
+            #     # if self.edge_position > (self._last_edge_position + 10) or self.edge_position < (self._last_edge_position-10):
+            #     if self.edge_position > 20:
+            #         self.image_ai = self.raw_input_image[(self._edge_position - 12):(self._edge_position + 12), 0:full_image_width]
+            #         self._last_edge_position = self._edge_position
+            #         lst = os.listdir("aiOutput/edge_detected")
+            #         cv2.imwrite("aiOutput/edge_detected/" + str(len(lst)) + ".jpg", self.image_ai)
+            #         # self.image_ai = self.raw_input_image
+            #         # print(str(self._left_edge_position) + " // " + str(self._right_edge_position))
 
             self.captured_images += 1
             self._fps_counter += 1

@@ -68,6 +68,51 @@ class ValueHandler:
     #     self._last_value = self._value
 
 
+class BoolHandler:
+    def __init__(self, value: bool):
+        self._value = value
+        self._last_value = value
+        self._new_value_available = False
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, value: bool):
+        if value is not None:
+            self._last_value = self._value
+            self._value = value
+
+    @property
+    def previous_value(self):
+        return self._last_value
+
+    @previous_value.setter
+    def previous_value(self, val):
+        pass
+
+    @property
+    def new_value_available(self):
+        if self._value != self._last_value:
+            return True
+        else:
+            return False
+
+    @property
+    def r_trigger(self):
+        if self._value and not self._last_value:
+            return True
+        else:
+            return False
+
+    def f_trigger(self):
+        if not self._value and self._last_value:
+            return True
+        else:
+            return False
+
+
 class ValueHandlerInt:
     def __init__(self, value=None):
         self._value = value
