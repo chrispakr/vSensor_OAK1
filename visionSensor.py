@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 from libs.functions import ValueHandler, ValueHandlerInt
 from collections import deque
@@ -9,6 +10,9 @@ import platform
 import base64
 import cv2
 import time
+import socket, pickle, struct
+import numpy
+
 
 if platform.system() == "Windows":
     # log_info_general("set parameters for windows-system")
@@ -46,24 +50,21 @@ class VisionSensor:
 
         self.name = vs_name
         self.device_info = device_info
-        self._is_front_sensor = is_front_sensor
+        # self._is_front_sensor = is_front_sensor
         self.film_type_is_negative = True
         self._total_edge_slope = 0
         self._enabled_lcm = False
         self.edge_position_tile_diff = 0
 
-        self.edge_position = 0
         self._edge_position = 0
-        self.edge_state = 0
         self._edge_detected = False
         self._edge_in_position = False
 
+        self.edge_position = 0
+        self.edge_state = 0
+
         self._image_center_position = 450
         self.proc_image_width = 400
-        self._stop_offset_compensation = 8
-        self._edge_detection_range = 30
-        # self._edge_status = 0
-        self._stop_motor = False
 
         self.capture_width = capture_width
         self.capture_height = capture_height
@@ -76,8 +77,8 @@ class VisionSensor:
         self.lcm_statistics = None
 
         # processing image variables
-        self.input_image_data = None
-        self.raw_input_image = None
+        self._input_image_data = None
+        self._raw_input_image = None
         self.np_image_tile_left = None
         self.np_image_tile_right = None
         self.np_image_info_edge_line = None
@@ -148,7 +149,6 @@ class VisionSensor:
 
         self.capture_time = time.time()
 
-        self._stop_position = 350
         self._lens_position = 130
 
         self.line_color_red = (32, 43, 255)
@@ -158,6 +158,21 @@ class VisionSensor:
         self.line_color_stop_position = (32, 43, 255)
         self.line_color_center_position = (163, 136, 22)
         self.line_color_stop_offset = (170, 102, 255)
+
+        self.thread_fps = threading.Thread(target=self._calc_fps)
+        self.thread_fps.daemon = True
+        self.thread_fps.start()
+
+        # self.enable_live_view = False
+        # self.socket_host_ip = socket_host_ip
+        # self.socket_host_port = socket_port
+        # self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # self.socket_address = (self.socket_host_ip, self.socket_host_port)
+        # self.server_socket.bind(self.socket_address)
+        # self.server_socket.listen(3)
+        # self._log_info_vsensor(f"Open Video Socket on: {self.socket_address}")
+        # self.cnt = 0
+
 
     @property
     def stop_position(self):
@@ -257,21 +272,21 @@ class VisionSensor:
         self.controlIn.out.link(self.camRgb.inputControl)
 
     def process_image(self):
-        self.input_image_data = self.image_edge_queue.tryGet()
-        if self.input_image_data is not None:
+        self._input_image_data = self.image_edge_queue.tryGet()
+        if self._input_image_data is not None:
+            self.t_start = time.time()
             self.np_image_info_setup_lines = None
             self.image_info_jpg = None
             self.image_info_base64 = None
-            # self._log_info_vsensor("capture-time: " + str(time.time() - self.capture_time))
             self.capture_time = time.time()
-            # self._edge_position.value = -1
-            self.raw_input_image = self.input_image_data.getCvFrame()
-            (full_image_height, full_image_width) = self.raw_input_image.shape[:2]
+            self._edge_position = -1
+            self._raw_input_image = self._input_image_data.getCvFrame()
+            (full_image_height, full_image_width) = self._raw_input_image.shape[:2]
             if self._image_center_position < self.preview_width // 2:
                 self._image_center_position = self.capture_width // 2
-            self.proc_image_centered = self.raw_input_image[0:full_image_height, self._image_center_position - (self.preview_width // 2):self._image_center_position + (self.preview_width // 2)]
-            self.np_image_tile_left = self.raw_input_image[0:self._stop_position + 50, self._image_center_position - self.proc_image_width:self._image_center_position-50]
-            self.np_image_tile_right = self.raw_input_image[0:self._stop_position + 50, self._image_center_position+50:self._image_center_position + self.proc_image_width]
+            self.proc_image_centered = self._raw_input_image[0:full_image_height, self._image_center_position - (self.preview_width // 2):self._image_center_position + (self.preview_width // 2)]
+            self.np_image_tile_left = self._raw_input_image[0:self._stop_position + 50, self._image_center_position - self.proc_image_width:self._image_center_position - 50]
+            self.np_image_tile_right = self._raw_input_image[0:self._stop_position + 50, self._image_center_position + 50:self._image_center_position + self.proc_image_width]
 
             self.left_edge_results = self.calc_edge_parameter(self.np_image_tile_left)
             self.right_edge_results = self.calc_edge_parameter(self.np_image_tile_right)
@@ -294,20 +309,12 @@ class VisionSensor:
             self._slope_total_mean = sum(self._arr_slope_total_mean) // len(self._arr_slope_total_mean)
             self._slope_diff_rising = self._total_edge_slope - min(self._arr_slope_total_mean)
             self._slope_diff_falling = self._slope_total_mean - max(self._arr_slope_total_mean)
-            # if self._is_front_sensor:
-            #     self._slope_diff = self._total_edge_slope - self._slope_total_mean
-            #     if self._slope_total_mean > 0:
-            #         slope_div = self._total_edge_slope / self._slope_total_mean
 
             if (self._total_edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
-                # if self._is_front_sensor:
-                #     self._log_info_vsensor("edge-diff (rising): {}".format(self._slope_diff))
                 self._new_edge_detected = 200
                 self._arr_slope_total_mean.clear()
                 self._arr_slope_total_mean.append(self._total_edge_slope)
             if (self._slope_total_mean - self._total_edge_slope) > 40 and self._new_edge_detected == 200:
-                # if self._is_front_sensor:
-                #     self._log_info_vsensor("edge-diff (falling): {}".format(self._slope_diff))
                 self._new_edge_detected = 0
                 self._arr_slope_total_mean.clear()
                 self._arr_slope_total_mean.append(self._total_edge_slope)
@@ -384,15 +391,10 @@ class VisionSensor:
             self.captured_images += 1
             self._fps_counter += 1
 
-            if (datetime.now() - self.fps_elapsed_time).seconds >= self.fps_report_time:
-                self.fps = self._fps_counter // self.fps_report_time
-                self.fps_elapsed_time = datetime.now()
-                # self._log_info_vsensor("FPS: {}".format(str(self.fps)))
-                self._fps_counter = 0
-            if int(self.input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
-                self.exposure_time = int(self.input_image_data.getExposureTime().total_seconds() * 1000000)
-            if self.input_image_data.getLensPosition() != self._lens_position:
-                self._lens_position = self.input_image_data.getLensPosition()
+            if int(self._input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
+                self.exposure_time = int(self._input_image_data.getExposureTime().total_seconds() * 1000000)
+            if self._input_image_data.getLensPosition() != self._lens_position:
+                self._lens_position = self._input_image_data.getLensPosition()
                 self._log_info_vsensor("lens-position changed to: {}".format(self._lens_position))
             if self.autoFocusEnabled:
                 if (datetime.now() - self.af_start_time).seconds > 2:
@@ -410,6 +412,21 @@ class VisionSensor:
                     self.camera_control_queue.send(self.camCtrl)
                     self.autoExposureEnabled = False
                     self.autoExposureFinished = True
+
+            # if not self.enable_live_view:
+            #     self.client_socket, self.addr = self.server_socket.accept()
+            #     print('GOT CONNECTION FROM:', self.addr)
+            #     if self.client_socket:
+            #         self.enable_live_view = True
+            #
+            # if self.enable_live_view:
+            #     start = time.time()
+            #     a = pickle.dumps(self._raw_input_image)
+            #     message = struct.pack("Q", len(a)) + a
+            #     print("sendframe with size: ", len(a))
+            #     # print("duration: ", time.time() - start)
+            #     self.client_socket.sendall(message)
+            # self._log_info_vsensor(f"loop_time: {time.time()-self.t_start}")
             return True
         else:
             return False
@@ -461,6 +478,7 @@ class VisionSensor:
 
     def auto_focus_camera(self):
         self._log_info_vsensor("Focus Camera...")
+        self.autoFocusFinished = False
         self.autoFocusEnabled = True
         self.af_start_time = datetime.now()
         self.camCtrl = dai.CameraControl()
@@ -516,10 +534,15 @@ class VisionSensor:
             slope_and_pos_output = ([min_slope * -1, max_slope, min_pos, max_pos])
         return slope_and_pos_output
 
+    def _calc_fps(self):
+        while True:
+            self.fps = self._fps_counter
+            # self._log_info_vsensor("FPS: {}".format(str(self.fps)))
+            self._log_info_vsensor(f"FPS: {self.fps} ######################################")
+            self._fps_counter = 0
+            time.sleep(1.0)
+
     def _log_info_vsensor(self, message):
         message = str(message)
-        if self._is_front_sensor:
-            log_message = "[vs-front]" + " - " + message
-        else:
-            log_message = "[vs-rear ]" + " - " + message
+        log_message = f"[{self.name}]" + " - " + message
         self.logger.info(log_message)
