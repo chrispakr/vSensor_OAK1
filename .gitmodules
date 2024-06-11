@@ -1,3 +1,6 @@
 [submodule "mqtt_handler"]
 	path = mqtt_handler
 	url = git@github.com:chrispakr/mqtt_handler.git
+[submodule "ads_handler"]
+	path = ads_handler
+	url = git@github.com:chrispakr/ads_handler.git
