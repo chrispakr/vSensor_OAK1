@@ -325,14 +325,14 @@ def mqtt_heartbeat():
 
 tl.start()
 
-# socket_handler = SocketHandler(host="192.168.0.30", port=4000, logger=logging)
+socket_handler = SocketHandler(host="192.168.0.30", port=4001, logger=logging)
 
 
 cam_vs_front._enabled_lcm = False
 cam_vs_rear._enabled_lcm = False
 
 main_loop_count = 0
-
+@tl.job(interval=timedelta(seconds=1))
 def main_loops():
     global main_loop_count
     while True:
@@ -340,9 +340,9 @@ def main_loops():
         main_loop_count = 0
         time.sleep(1.0)
 
-t_main_loop_count = threading.Thread(target=main_loops)
-t_main_loop_count.daemon = True
-t_main_loop_count.start()
+# t_main_loop_count = threading.Thread(target=main_loops)
+# t_main_loop_count.daemon = True
+# t_main_loop_count.start()
 
 
 with (contextlib.ExitStack() as stack):
@@ -357,18 +357,45 @@ with (contextlib.ExitStack() as stack):
         move_command.value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_fmCtrl_moveCommand)
         film_move_direction.value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection)
 
-        #focus camera front
-        if plc_handler.vs_ctrl.auto_exposure_cameras.new_value_available():
-            log_info_general("trigger AutoFocus....")
+        # auto-exposure camera front
+        if plc_handler.vs_ctrl.auto_exposure_cameras.value:
+            log_info_general("ADS: Start AutoExposure....")
+            plc_handler.vs_ctrl.is_ready.value = False
+            cam_vs_front.auto_exposure_camera()
+            cam_vs_rear.auto_exposure_camera()
+            plc_handler.vs_ctrl.auto_exposure_cameras.value = False
+
+        # auto-exposure camera front finished
+        if cam_vs_front.autoExposureFinished and cam_vs_rear.autoExposureFinished:
+            mean_exposure = (cam_vs_front.exposure_time + cam_vs_rear.exposure_time) // 2
+            log_info_general("AutoExposure Finished")
+            log_info_general(f"Exposure cam_front: {cam_vs_front.exposure_time}us")
+            log_info_general(f"Exposure cam_rear : {cam_vs_rear.exposure_time}us")
+            log_info_general(f"Set mean-exposure-time to: {mean_exposure}us")
+            plc_handler.vs_ctrl.exposure_time.value = mean_exposure
+            cam_vs_front.autoExposureFinished = False
+            cam_vs_rear.autoExposureFinished = False
+            plc_handler.vs_ctrl.is_ready.value = True
+
+        # autofocus camera front
+        if plc_handler.vs_ctrl.auto_focus_cameras.value:
+            log_info_general("ADS: Start AutoFocus Cameras....")
             plc_handler.vs_ctrl.is_ready.value = False
             cam_vs_front.auto_focus_camera()
             cam_vs_rear.auto_focus_camera()
+            plc_handler.vs_ctrl.auto_focus_cameras.value = False
 
-
-        # focus camera front finished
+        # autofocus camera front finished
         if cam_vs_front.autoFocusFinished and cam_vs_rear.autoFocusFinished:
-            log_info_general("autoFocus finished... ")
+            log_info_general("AutoFocus Finished")
+            log_info_general(f"Lens-Position cam_front: {cam_vs_front.focus_position}")
+            log_info_general(f"Lens-Position cam_rear : {cam_vs_rear.focus_position}")
+            plc_handler.vs_ctrl.vs_front_focus_position.value = cam_vs_front.focus_position
+            plc_handler.vs_ctrl.vs_rear_focus_position.value = cam_vs_rear.focus_position
+            cam_vs_front.autoFocusFinished = False
+            cam_vs_rear.autoFocusFinished = False
             plc_handler.vs_ctrl.is_ready.value = True
+
 
 
         # auto exposure cameras
@@ -387,24 +414,17 @@ with (contextlib.ExitStack() as stack):
         #     vs_rear_send_mqtt_image = True
         #     log_info_general("set exposure to: {}".format(exposure_mean))
         #
-        # set exposure-time to cameras
-        if plc_handler.vs_ctrl.exposure_time.new_value_available():
-            cam_vs_front.set_exposure_value(plc_handler.vs_ctrl.exposure_time.value)
-            cam_vs_rear.set_exposure_value(plc_handler.vs_ctrl.exposure_time.value)
-            vs_front_send_mqtt_image = True
-            vs_rear_send_mqtt_image = True
-            log_info_general(f"set camera_exposure_time to: {plc_handler.vs_ctrl.exposure_time.value}")
 
-        # # set film-type positive/negative
-        if plc_handler.vs_ctrl.film_type_is_negative.new_value_available():
-            cam_vs_front.film_type_is_negative = plc_handler.vs_ctrl.film_type_is_negative.value
-            cam_vs_rear.film_type_is_negative = plc_handler.vs_ctrl.film_type_is_negative.value
-            if plc_handler.vs_ctrl.film_type_is_negative.value:
-                cam_vs_front.set_exposure_value(exposure_value_negative)
-                cam_vs_rear.set_exposure_value(exposure_value_negative)
-            else:
-                cam_vs_front.set_exposure_value(exposure_value_positive)
-                cam_vs_rear.set_exposure_value(exposure_value_positive)
+        # # # set film-type positive/negative
+        # if plc_handler.vs_ctrl.film_type_is_negative.new_value_available():
+        #     cam_vs_front.film_type_is_negative = plc_handler.vs_ctrl.film_type_is_negative.value
+        #     cam_vs_rear.film_type_is_negative = plc_handler.vs_ctrl.film_type_is_negative.value
+        #     if plc_handler.vs_ctrl.film_type_is_negative.value:
+        #         cam_vs_front.set_exposure_value(exposure_value_negative)
+        #         cam_vs_rear.set_exposure_value(exposure_value_negative)
+        #     else:
+        #         cam_vs_front.set_exposure_value(exposure_value_positive)
+        #         cam_vs_rear.set_exposure_value(exposure_value_positive)
 
         # swap sensors
         if plc_handler.vs_ctrl.swap_cameras.value:
@@ -417,26 +437,26 @@ with (contextlib.ExitStack() as stack):
 
         # Check enableLowContrastMode
         if plc_handler.vs_ctrl.enable_lcm_mode.new_value_available():
-            log_info_general(f"set enableLowContrastMode to: {plc_handler.vs_ctrl.enable_lcm_mode.value}")
+            log_info_general(f"ADS: set enableLowContrastMode to: {plc_handler.vs_ctrl.enable_lcm_mode.value}")
             cam_vs_front.enable_low_contrast_mode = plc_handler.vs_ctrl.enable_lcm_mode.value
             cam_vs_rear.enable_low_contrast_mode = plc_handler.vs_ctrl.enable_lcm_mode.value
 
         # lcm set lcm_slope
         if plc_handler.vs_ctrl.lcm_slope.new_value_available():
-            log_info_general(f"set lcm_slope to: {plc_handler.vs_ctrl.lcm_slope.value}")
+            log_info_general(f"ADS: set lcm_slope to: {plc_handler.vs_ctrl.lcm_slope.value}")
             cam_vs_front.lcm_slope = plc_handler.vs_ctrl.lcm_slope.value
             cam_vs_rear.lcm_slope = plc_handler.vs_ctrl.lcm_slope.value
 
         # lcm set lcm_contrast
         if plc_handler.vs_ctrl.lcm_contrast_offset.new_value_available():
-            log_info_general(f"set lcm_contrast_offset to: {plc_handler.vs_ctrl.lcm_contrast_offset.value}")
+            log_info_general(f"ADS: set lcm_contrast_offset to: {plc_handler.vs_ctrl.lcm_contrast_offset.value}")
             cam_vs_front.lcm_contrast_offset = plc_handler.vs_ctrl.lcm_contrast_offset.value
             cam_vs_rear.lcm_contrast_offset = plc_handler.vs_ctrl.lcm_contrast_offset.value
 
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setOperationMode):
             vs_operation_mode = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setOperationMode)
-            log_info_general("change OperationMode to: {}".format(str(vs_operation_mode)))
+            log_info_general("ADS: change OperationMode to: {}".format(str(vs_operation_mode)))
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_getOperationMode, vs_operation_mode)
 
         # Capture Image
@@ -479,28 +499,29 @@ with (contextlib.ExitStack() as stack):
 
         # print("nr socket conn: ", socket_handler.active_connections.connected_clients)
 
-        if cam_vs_front.process_image():
-            # print(cam_vs_front.edge_state, cam_vs_front.edge_position)
-            if plc_handler.vs_ctrl.enable_live_view.value:
+        if cam_vs_front.new_image_available:
+            print(socket_handler._client_connected)
+            if socket_handler._client_connected:
+                print(vs_front_live_view_frame_nr, live_view_fps_divider)
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
-                    vs_front_send_mqtt_image = True
+                    # print("send image to socket")
+                    socket_handler.send_image(cam_vs_front._raw_input_image, cam_vs_rear._raw_input_image)
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
+            # print(cam_vs_front.edge_state, cam_vs_front.edge_position)
+            # if plc_handler.vs_ctrl.enable_live_view.value:
+            #     if vs_front_live_view_frame_nr == live_view_fps_divider:
+            #         vs_front_send_mqtt_image = True
+            #         vs_front_live_view_frame_nr = 0
+            #     vs_front_live_view_frame_nr += 1
 
-        if cam_vs_rear.process_image():
-            if plc_handler.vs_ctrl.enable_live_view.value:
-                if vs_rear_live_view_frame_nr == live_view_fps_divider:
-                    vs_rear_send_mqtt_image = True
-                    vs_rear_live_view_frame_nr = 0
-                vs_rear_live_view_frame_nr += 1
-
-
-        # if socket_handler.active_connections.connected_clients > 0:
-        #     if vs_front_live_view_frame_nr == live_view_fps_divider:
-        #         send_image = np.concatenate((cam_vs_front._raw_input_image, cam_vs_rear._raw_input_image), axis=1)
-        #         socket_handler.send_image(send_image)
-        #         vs_front_live_view_frame_nr = 0
-        #     vs_front_live_view_frame_nr += 1
+        if cam_vs_rear.new_image_available:
+            pass
+            # if plc_handler.vs_ctrl.enable_live_view.value:
+            #     if vs_rear_live_view_frame_nr == live_view_fps_divider:
+            #         vs_rear_send_mqtt_image = True
+            #         vs_rear_live_view_frame_nr = 0
+            #     vs_rear_live_view_frame_nr += 1
 
         # vs_front_exposure.value = cam_vs_front.exposure_time
         # vs_rear_exposure.value = cam_vs_rear.exposure_time
@@ -531,9 +552,6 @@ with (contextlib.ExitStack() as stack):
         #         mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_pictureIsInPosition, value=1)
         #         # log_info_general("set ads_stop_film to false")
         #         # plc_handler.stop_film = True
-
-        plc_handler.vs_ctrl.vs_front_edge_state.value = cam_vs_front.edge_state
-        plc_handler.vs_ctrl.vs_rear_edge_state.value = cam_vs_rear.edge_state
 
         plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.edge_position
         plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.edge_position
