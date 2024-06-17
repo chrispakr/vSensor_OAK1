@@ -27,8 +27,6 @@ init_config_file = "../config/init.ini"
 settings_config_file = "../config/settings.ini"
 
 if platform.system() == "Windows":
-    import matplotlib.pyplot as plt
-    enable_chart = False
     init_config_file = "config/init.ini"
     settings_config_file = "config/settings.ini"
 
@@ -45,8 +43,6 @@ camera_fps = 45
 vs_op_modes = VisionSensorOperationMode
 vs_operation_mode = 0
 
-mqtt_report_position_steps = 2
-
 live_view_fps_divider = 2
 vs_front_live_view_frame_nr = 0
 vs_rear_live_view_frame_nr = 0
@@ -54,39 +50,10 @@ vs_rear_live_view_frame_nr = 0
 exposure_value_positive = 5000
 exposure_value_negative = 1200
 
-vs_front_stop_offset = 0
-vs_rear_stop_offset = 0
-
-send_stop_motor_time = time.time()
-motor_stopped_time = time.time()
-
-vs_front_last_mqtt_position_value = 0
-vs_rear_last_mqtt_position_value = 0
-
-film_move_direction = ValueHandler(0)
-
-vs_front_exposure = ValueHandler(0)
-vs_rear_exposure = ValueHandler(0)
-
-def clamp(num, v0, v1):
-    return max(v0, min(num, v1))
-
-# image_is_centered =             ValueHandler(False)
-# film_move_direction =           ValueHandler(0)
-
-# vs_front_edge_detection_active = ValueHandler(False)
-# vs_rear_edge_detection_active = ValueHandler(False)
-
-move_command = ValueHandler(0)
-
 vs_front_send_mqtt_image =      False
 vs_rear_send_mqtt_image =       False
 vs_front_send_mqtt_values =     False
 vs_rear_send_mqtt_values =      False
-
-
-vs_front_sent_stop_position =   0
-vs_rear_sent_stop_position =    0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -179,7 +146,6 @@ found_front_sensor, device_info_front_sensor = dai.Device.getDeviceByMxId(config
 found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceByMxId(config_init.get(vs_rear_config_name, "serial"))
 
 if not found_front_sensor or not found_rear_sensor:
-    #devices = dai.Device.getAllAvailableDevices()
     if len(devices_found) == 2:
         config_init.set(vs_front_config_name, "serial", devices_found[0].getMxId())
         config_init.set(vs_rear_config_name, "serial", devices_found[1].getMxId())
@@ -285,10 +251,6 @@ def main_loops():
         main_loop_count = 0
         time.sleep(1.0)
 
-# t_main_loop_count = threading.Thread(target=main_loops)
-# t_main_loop_count.daemon = True
-# t_main_loop_count.start()
-
 
 with (contextlib.ExitStack() as stack):
     while True:
@@ -296,11 +258,8 @@ with (contextlib.ExitStack() as stack):
         startTime = time.time()
 
         #######################################################################################################
-        # Checking incoming mqtt-messages / values (promptSCAN COMPATIBILITY CODE // DEPRECATED)
+        # Checking ADS-Values for any changes...
         #######################################################################################################
-
-        move_command.value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_fmCtrl_moveCommand)
-        film_move_direction.value = mqtt.getMqttValue(mqtt.sTopics_vsController.get_fmCtrl_filmMoveDirection)
 
         # auto-exposure camera front
         if plc_handler.vs_ctrl.auto_exposure_cameras.value:
@@ -424,11 +383,10 @@ with (contextlib.ExitStack() as stack):
         ##################################################################################################################
 
         if cam_vs_front.new_image_available:
-            print(socket_handler._client_connected)
-            if socket_handler._client_connected:
+            if socket_handler.client_connected:
                 print(vs_front_live_view_frame_nr, live_view_fps_divider)
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
-                    socket_handler.send_image(cam_vs_front._raw_input_image, cam_vs_rear._raw_input_image)
+                    socket_handler.send_image(cam_vs_front.numpy_image_array, cam_vs_rear.numpy_image_array)
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
 
