@@ -75,6 +75,10 @@ class SocketHandler:
         self._t_image = np.concatenate((image_rear, image_front), axis=1)
         self._start_transfer = True
 
+    @property
+    def client_connected(self):
+        return self._client_connected
+
     def _log_info(self, message):
         message = str(message)
         log_message = f"[sHandler]" + " - " + message
