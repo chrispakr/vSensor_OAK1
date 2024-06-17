@@ -464,6 +464,10 @@ class VisionSensor:
         self.camCtrl.setManualFocus(lens_position)
         self.camera_control_queue.send(self.camCtrl)
 
+    @property
+    def numpy_image_array(self):
+        return self._raw_input_image
+
     def set_exposure_value(self, exposure):
         self._log_info_vsensor("Set exposure to: {}".format(exposure))
         self.camCtrl = dai.CameraControl()
