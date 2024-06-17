@@ -423,32 +423,17 @@ with (contextlib.ExitStack() as stack):
         # IMAGE PROCESSING PART
         ##################################################################################################################
 
-        # print("nr socket conn: ", socket_handler.active_connections.connected_clients)
-
         if cam_vs_front.new_image_available:
             print(socket_handler._client_connected)
             if socket_handler._client_connected:
                 print(vs_front_live_view_frame_nr, live_view_fps_divider)
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
-                    # print("send image to socket")
                     socket_handler.send_image(cam_vs_front._raw_input_image, cam_vs_rear._raw_input_image)
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
-            # print(cam_vs_front.edge_state, cam_vs_front.edge_position)
-            # if plc_handler.vs_ctrl.enable_live_view.value:
-            #     if vs_front_live_view_frame_nr == live_view_fps_divider:
-            #         vs_front_send_mqtt_image = True
-            #         vs_front_live_view_frame_nr = 0
-            #     vs_front_live_view_frame_nr += 1
 
         if cam_vs_rear.new_image_available:
             pass
-            # if plc_handler.vs_ctrl.enable_live_view.value:
-            #     if vs_rear_live_view_frame_nr == live_view_fps_divider:
-            #         vs_rear_send_mqtt_image = True
-            #         vs_rear_live_view_frame_nr = 0
-            #     vs_rear_live_view_frame_nr += 1
-
 
         plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.edge_position
         plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.edge_position
