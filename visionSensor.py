@@ -180,10 +180,10 @@ class VisionSensor:
         # self.enable_live_view = False
         # self.socket_host_ip = socket_host_ip
         # self.socket_host_port = socket_port
-        # self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # self.socket_address = (self.socket_host_ip, self.socket_host_port)
-        # self.server_socket.bind(self.socket_address)
-        # self.server_socket.listen(3)
+        # self._server_socket.bind(self.socket_address)
+        # self._server_socket.listen(3)
         # self._log_info_vsensor(f"Open Video Socket on: {self.socket_address}")
         # self.cnt = 0
 
@@ -370,8 +370,8 @@ class VisionSensor:
                 self._new_image_available = True
             time.sleep(0.0001)
                 # if not self.enable_live_view:
-                #     self.client_socket, self.addr = self.server_socket.accept()
-                #     print('GOT CONNECTION FROM:', self.addr)
+                #     self.client_socket, self._addr = self._server_socket.accept()
+                #     print('GOT CONNECTION FROM:', self._addr)
                 #     if self.client_socket:
                 #         self.enable_live_view = True
                 #
