@@ -572,8 +572,6 @@ class VisionSensor:
     def _calc_fps(self):
         while True:
             self.fps = self._fps_counter
-            # self._log_info_vsensor("FPS: {}".format(str(self.fps)))
-            self._log_info_vsensor(f"FPS: {self.fps} ######################################")
             self._fps_counter = 0
             time.sleep(1.0)
 
