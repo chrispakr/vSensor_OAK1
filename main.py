@@ -384,7 +384,6 @@ with (contextlib.ExitStack() as stack):
 
         if cam_vs_front.new_image_available:
             if socket_handler.client_connected:
-                print(vs_front_live_view_frame_nr, live_view_fps_divider)
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
                     socket_handler.send_image(cam_vs_front.numpy_image_array, cam_vs_rear.numpy_image_array)
                     vs_front_live_view_frame_nr = 0
