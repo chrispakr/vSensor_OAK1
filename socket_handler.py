@@ -1,18 +1,7 @@
 import socket, pickle, struct
 import threading
 import time
-# from turbojpeg import TurboJPEG
-import platform
 import numpy as np
-
-# if platform.system() == "Linux":
-#     # self._log_info_vsensor("set parameters for linux-system")
-#     jpeg = TurboJPEG()
-#     showOutput = False
-
-
-
-
 
 
 class ActiveSocketConnections:
@@ -34,7 +23,9 @@ class SocketHandler:
         self.host_port = port
         self.max_listeners = max_listeners
         self.active_connections = ActiveSocketConnections()
-        # self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_socket = None
+        self._conn = None
+        self._addr = None
         self._t_image = None
         self._client_connected = False
         self._start_transfer = False
@@ -52,8 +43,7 @@ class SocketHandler:
                         start = time.time()
                         a = pickle.dumps(self._t_image)
                         message = struct.pack("Q", len(a)) + a
-                        self.conn.sendall(message)
-                        print("sendframe with size: ", len(a), len(self._t_image), time.time() - start)
+                        self._conn.sendall(message)
                         self._start_transfer = False
                         self._t_image = None
                         time.sleep(0.04)
@@ -63,24 +53,22 @@ class SocketHandler:
                 self._client_connected = False
                 self.socketClose()
                 time.sleep(1)
-                # self.socketOpen()
                 self.s_thread = threading.Thread(target=self._bg_task)
                 self.s_thread.start()
                 break
 
     def socketOpen(self):
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.server_socket.bind((self.host_ip, self.host_port))
-        self.server_socket.listen(1)
+        self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server_socket.bind((self.host_ip, self.host_port))
+        self._server_socket.listen(1)
         self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is open')
-        self.conn, self.addr = self.server_socket.accept()
-        print("##########################################################################")
+        self._conn, self._addr = self._server_socket.accept()
         self._client_connected = True
         self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is connected with client')
 
     def socketClose(self):
-        self.server_socket.close()
+        self._server_socket.close()
         self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is close')
 
     def send_image(self, image_rear, image_front):
