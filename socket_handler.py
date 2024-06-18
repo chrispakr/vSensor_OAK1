@@ -26,7 +26,9 @@ class SocketHandler:
         self._server_socket = None
         self._conn = None
         self._addr = None
-        self._t_image = None
+        self.socket_data = None
+        self._t_image_rear = None
+        self._t_image_front = None
         self._client_connected = False
         self._start_transfer = False
         self.s_thread = threading.Thread(target=self._bg_task)
@@ -37,16 +39,13 @@ class SocketHandler:
         self.socketOpen()
         while True:
             try:
-                if self._start_transfer:
-                    # print("transfer image")
-                    if self._t_image is not None:
-                        start = time.time()
-                        a = pickle.dumps(self._t_image)
-                        message = struct.pack("Q", len(a)) + a
-                        self._conn.sendall(message)
-                        self._start_transfer = False
-                        self._t_image = None
-                        time.sleep(0.04)
+                if self._t_image_front is not None and self._t_image_rear is not None:
+                    socket_data = {"image_front" : self._t_image_front, "image_rear" : self._t_image_rear}
+                    a = pickle.dumps(socket_data)
+                    message = struct.pack("Q", len(a)) + a
+                    self._conn.sendall(message)
+                    self._t_image_rear = None
+                    self._t_image_front = None
 
             except Exception as e:
                 self._log_info(e)
@@ -56,6 +55,8 @@ class SocketHandler:
                 self.s_thread = threading.Thread(target=self._bg_task)
                 self.s_thread.start()
                 break
+
+            time.sleep(0.04)
 
     def socketOpen(self):
         self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -72,8 +73,8 @@ class SocketHandler:
         self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is close')
 
     def send_image(self, image_rear, image_front):
-        self._t_image = np.concatenate((image_rear, image_front), axis=1)
-        self._start_transfer = True
+        self._t_image_rear = image_rear
+        self._t_image_front = image_front
 
     @property
     def client_connected(self):
