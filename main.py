@@ -383,20 +383,21 @@ with (contextlib.ExitStack() as stack):
         ##################################################################################################################
 
         if cam_vs_front.new_image_available:
-            if socket_handler.client_connected:
+            if plc_handler.vs_ctrl.enable_live_view.value:
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
-                    socket_handler.send_image(cam_vs_front.numpy_image_array, cam_vs_rear.numpy_image_array)
+                    socket_handler.send_image(
+                        image_rear=cam_vs_rear.numpy_image_array,
+                        image_front=cam_vs_front.numpy_image_array
+                    )
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
+            plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.edge_position
+            plc_handler.vs_ctrl.vs_front_fps.value = cam_vs_front.fps
 
         if cam_vs_rear.new_image_available:
-            pass
+            plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.edge_position
+            plc_handler.vs_ctrl.vs_rear_fps.value = cam_vs_rear.fps
 
-        plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.edge_position
-        plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.edge_position
-
-        plc_handler.vs_ctrl.vs_front_fps = cam_vs_front.fps
-        plc_handler.vs_ctrl.vs_rear_fps = cam_vs_rear.fps
 
         # if vs_rear_edge_state.new_value_available:
         #     plc_handler.vs_rear_edge_state = vs_rear_edge_state.value
