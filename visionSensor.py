@@ -32,6 +32,17 @@ class VisionSensorOperationMode(Enum):
         BOTH_SENSORS = 3
 
 
+def get_base64_image_data(image):
+    if image is not None:
+        print("get_base64_image_data")
+        print(image.shape)
+        image_jpg = jpeg.encode(image, quality=80)
+        image_info_base64 = base64.b64encode(image_jpg)
+        return  image_info_base64
+    else:
+        return 0
+
+
 class VisionSensor:
     fps_report_time = 3
     _contrast_pic_height = 20
@@ -244,6 +255,8 @@ class VisionSensor:
                     self._image_center_position = self.capture_width // 2
                 self.proc_image_centered = self._raw_input_image[0:full_image_height, self._image_center_position - (self.preview_width // 2):self._image_center_position + (self.preview_width // 2)]
 
+                self.img_height, self.img_width = self.proc_image_centered.shape[:2]
+
                 self.np_image_tile_left = self._raw_input_image[
                                           0:self._stop_position + 50,
                                           self._image_center_position - self.proc_image_width:self._image_center_position - 50
@@ -339,11 +352,14 @@ class VisionSensor:
                 else:
                     self._edge_in_position = False
 
-                if self._edge_detected:
-                    self.edge_position = self._edge_position
-                else:
+                if not self._edge_detected and not self._edge_in_position:
                     self.edge_position = -1
 
+                if self._edge_detected and not self._edge_in_position:
+                    self.edge_position = self._edge_position
+
+                if self._edge_detected and self._edge_in_position:
+                    self.edge_position = self._edge_position
 
                 if int(self._input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
                     self.exposure_time = int(self._input_image_data.getExposureTime().total_seconds() * 1000000)
@@ -384,43 +400,54 @@ class VisionSensor:
                 #     self.client_socket.sendall(message)
                 # self._log_info_vsensor(f"loop_time: {time.time()-self.t_start}")
 
-    def create_image_info(self):
-        if self.proc_image_centered is not None:
-            self.np_image_info_edge_line = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
-            self._img_height, self._img_width, dim = self.np_image_info_edge_line.shape
-            self.img_width = self._img_width
-            self.img_height = self._img_height
-            if self.edge_state == 2:
-                line_color = self.line_color_green
-            else:
-                line_color = self.line_color_orange
+    # def create_image_info(self):
+    #     if self.proc_image_centered is not None:
+    #         self.np_image_info_edge_line = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
+    #         self._img_height, self._img_width, dim = self.np_image_info_edge_line.shape
+    #         self.img_width = self._img_width
+    #         self.img_height = self._img_height
+    #         if self.edge_state == 2:
+    #             line_color = self.line_color_green
+    #         else:
+    #             line_color = self.line_color_orange
+    #
+    #         cv2.line(self.np_image_info_edge_line, (0, self._stop_position), (100, self._stop_position), self.line_color_stop_position, 2)
+    #         cv2.line(self.np_image_info_edge_line, (self._img_width-100, self._stop_position), (self._img_width, self._stop_position), self.line_color_stop_position, 2)
+    #         cv2.line(self.np_image_info_edge_line, (self._img_width - 50, self._stop_position-self.stop_offset_compensation), (self._img_width, self._stop_position-self.stop_offset_compensation), self.line_color_stop_offset, 2)
+    #         cv2.line(self.np_image_info_edge_line, (0, self._stop_position - self.stop_offset_compensation), (50, self._stop_position - self.stop_offset_compensation),
+    #                  self.line_color_stop_offset, 2)
+    #         cv2.line(self.np_image_info_edge_line, (0, self._edge_position), (self._img_width, self._edge_position), line_color, 2)
+    #         self.np_image_info_setup_lines = self.np_image_info_edge_line
+    #         cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 - self.proc_image_width, 0),
+    #                  (self._img_width // 2 - self.proc_image_width, self._img_height), self.line_color_proc_image, 1)
+    #         cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 + self.proc_image_width, 0),
+    #                  (self._img_width // 2 + self.proc_image_width, self._img_height), self.line_color_proc_image, 1)
+    #         cv2.line(self.np_image_info_setup_lines, (self._img_width // 2, 0), (self._img_width // 2, self._img_height), self.line_color_center_position, 1)
+    #         cv2.line(self.np_image_info_setup_lines, (self._img_width // 2, self._img_height-60), (self._img_width // 2, self._img_height), self.line_color_center_position, 2)
+    #         return True
+    #     else:
+    #         return False
 
-            cv2.line(self.np_image_info_edge_line, (0, self._stop_position), (100, self._stop_position), self.line_color_stop_position, 2)
-            cv2.line(self.np_image_info_edge_line, (self._img_width-100, self._stop_position), (self._img_width, self._stop_position), self.line_color_stop_position, 2)
-            cv2.line(self.np_image_info_edge_line, (self._img_width - 50, self._stop_position-self.stop_offset_compensation), (self._img_width, self._stop_position-self.stop_offset_compensation), self.line_color_stop_offset, 2)
-            cv2.line(self.np_image_info_edge_line, (0, self._stop_position - self.stop_offset_compensation), (50, self._stop_position - self.stop_offset_compensation),
-                     self.line_color_stop_offset, 2)
-            cv2.line(self.np_image_info_edge_line, (0, self._edge_position), (self._img_width, self._edge_position), line_color, 2)
-            self.np_image_info_setup_lines = self.np_image_info_edge_line
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 - self.proc_image_width, 0),
-                     (self._img_width // 2 - self.proc_image_width, self._img_height), self.line_color_proc_image, 1)
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2 + self.proc_image_width, 0),
-                     (self._img_width // 2 + self.proc_image_width, self._img_height), self.line_color_proc_image, 1)
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2, 0), (self._img_width // 2, self._img_height), self.line_color_center_position, 1)
-            cv2.line(self.np_image_info_setup_lines, (self._img_width // 2, self._img_height-60), (self._img_width // 2, self._img_height), self.line_color_center_position, 2)
-            return True
-        else:
-            return False
+    # def create_image_info_jpg(self):
+    #     if self.np_image_info_setup_lines is None:
+    #         self.create_image_info()
+    #     if self.np_image_info_setup_lines is not None:
+    #         self.image_info_jpg = jpeg.encode(self.np_image_info_setup_lines, quality=80)
+    #         self.image_info_base64 = base64.b64encode(self.image_info_jpg)
+    #         return True
+    #     else:
+    #         return False
 
-    def create_image_info_jpg(self):
-        if self.np_image_info_setup_lines is None:
-            self.create_image_info()
-        if self.np_image_info_setup_lines is not None:
-            self.image_info_jpg = jpeg.encode(self.np_image_info_setup_lines, quality=80)
+    def get_base64_image(self):
+        try:
+            print("get_base64_image")
+            print(self.proc_image_centered.shape)
+            self.image_info_jpg = jpeg.encode(self.proc_image_centered, quality=80)
             self.image_info_base64 = base64.b64encode(self.image_info_jpg)
-            return True
-        else:
-            return False
+            return self.image_info_base64
+        except Exception as e:
+            # self._log_info_vsensor(traceback.format_exc())
+            return None
 
     def calc_statistics(self):
         if self.np_image_tile_left is not None and self.np_image_tile_right is not None:
@@ -428,6 +455,50 @@ class VisionSensor:
             stat_image_tile_left = self.np_image_tile_left[0:self._edge_position - 20, 0:tile_width]
             stat_image_tile_right = self.np_image_tile_right[0:self._edge_position - 20, 0:tile_width]
             self.stat_image_full = np.concatenate((stat_image_tile_left, stat_image_tile_right), axis=1)
+
+            vs_maximum_dn = 256  # for image depth of byte
+            clipping_percent = 0.05  # in percent for clipping the histogram with 0.025% from left and 0.025% from right
+
+            # computing histogram
+            hist = cv2.calcHist([self.stat_image_full], [0], None, [vs_maximum_dn], [0, vs_maximum_dn])
+            hist = hist.flatten()
+
+            # Clipping the histogram by CLIPPING_PERCENT/2 % from bottom and top
+            cutoff = self.stat_image_full.shape[0] * self.stat_image_full.shape[1] * clipping_percent / 2
+
+            image_min, image_max, _, _ = cv2.minMaxLoc(self.stat_image_full)
+            clip_min = image_min  # starting value for clipMin
+            clip_max = image_max  # starting value for clipMax
+
+            accumulate_right = 0
+            accumulate_left = 0
+            clip_left_found = False
+            clip_right_found = False
+            for i in range(hist.size):
+                if not clip_right_found:
+                    accumulate_right += hist[hist.size - 1 - i]
+                    if accumulate_right < cutoff:
+                        clip_max = hist.size - 2 - i
+                    else:
+                        clip_right_found = True
+
+                if not clip_left_found:
+                    accumulate_left += hist[i]
+                    if accumulate_left < cutoff:
+                        clip_min = i
+                    else:
+                        clip_left_found = True
+
+                if clip_left_found and clip_right_found:
+                    break
+
+            # computing the mean and standard deviation. Note that the returned values are two-dimensional
+            mean, std_dev = cv2.meanStdDev(self.stat_image_full)
+
+            # flatten mean and std to obtain a vector and obtain the single value in it.
+            return (image_min, image_max, clip_min, clip_max, round(mean.flatten()[0], 3), round(std_dev.flatten()[0], 3))
+        else:
+            return None
 
     def auto_focus_camera(self):
         self._log_info_vsensor("Focus Camera...")
