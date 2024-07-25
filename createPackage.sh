@@ -1,5 +1,5 @@
 #!/bin/bash
-programName="vSensor3"
+programName="vSensorM4"
 venvPath="venv_pi"
 echo "#############################################"
 echo "Start Deploy Script for $programName"
@@ -7,7 +7,7 @@ echo "#############################################"
 workingDir="$PWD"
 distPath="${workingDir}/dist/${programName}/"
 fullVenvPath=${workingDir}/${venvPath}/bin/activate
-deployPath="/mnt/updates/${programName}"
+deployPath="/mnt/${programName}/update"
 fileExtension="tgz"
 buildDate=$(date +"%Y-%m-%d_%H%M")
 filename="${programName}_${buildDate}.${fileExtension}"
@@ -33,7 +33,7 @@ echo "create binary package"
 echo "############################################"
 
 source "$fullVenvPath"
-pyinstaller --clean -y vSensor3.spec
+pyinstaller --clean -y vSensorM4.spec
 
 echo "############################################"
 echo "create binary package finished"
