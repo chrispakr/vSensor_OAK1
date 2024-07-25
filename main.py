@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta
 import mqtt_handler.mqtt_communication_handler_v2 as mqtt_communication_handler
 import libs.functions as ef
+import visionSensor
 from libs.functions import ValueHandler
 from configparser import ConfigParser
 from collections import deque
@@ -68,51 +69,6 @@ def log_info_general(message):
 
 tl = Timeloop()
 
-def compute_stats(image):
-    if image is not None:
-        vs_maximum_dn = 256  # for image depth of byte
-        clipping_percent = 0.05  # in percent for clipping the histogram with 0.025% from left and 0.025% from right
-
-        # computing histogram
-        hist = cv2.calcHist([image], [0], None, [vs_maximum_dn], [0, vs_maximum_dn])
-        hist = hist.flatten()
-
-        # Clipping the histogram by CLIPPING_PERCENT/2 % from bottom and top
-        cutoff = image.shape[0] * image.shape[1] * clipping_percent / 2
-
-        image_min, image_max, _, _ = cv2.minMaxLoc(image)
-        clip_min = image_min  # starting value for clipMin
-        clip_max = image_max  # starting value for clipMax
-
-        accumulate_right = 0
-        accumulate_left = 0
-        clip_left_found = False
-        clip_right_found = False
-        for i in range(hist.size):
-            if not clip_right_found:
-                accumulate_right += hist[hist.size - 1 - i]
-                if accumulate_right < cutoff:
-                    clip_max = hist.size - 2 - i
-                else:
-                    clip_right_found = True
-
-            if not clip_left_found:
-                accumulate_left += hist[i]
-                if accumulate_left < cutoff:
-                    clip_min = i
-                else:
-                    clip_left_found = True
-
-            if clip_left_found and clip_right_found:
-                break
-
-        # computing the mean and standard deviation. Note that the returned values are two-dimensional
-        mean, std_dev = cv2.meanStdDev(image)
-
-        # flatten mean and std to obtain a vector and obtain the single value in it.
-        return (image_min, image_max, clip_min, clip_max, round(mean.flatten()[0], 3), round(std_dev.flatten()[0], 3))
-    else:
-        return None
 
 # Read Init-Configuration
 log_info_general("read init-config file..")
@@ -169,8 +125,8 @@ for section in config_init.sections():
     print()
 
 
-if config_init.has_option("general", "fps"):
-    camera_fps = config_init.getint("general", "fps")
+if config_init.has_option("settings", "fps"):
+    camera_fps = config_init.getint("settings", "fps")
 else:
     log_info_general("No config parameter found for 'FPS' - set standard value of 45")
     camera_fps = 45
@@ -344,12 +300,6 @@ with (contextlib.ExitStack() as stack):
             log_info_general("ADS: change OperationMode to: {}".format(str(vs_operation_mode)))
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_getOperationMode, vs_operation_mode)
 
-        # Capture Image
-        if plc_handler.vs_ctrl.capture_image.value:
-            vs_front_send_mqtt_image = True
-            vs_front_send_mqtt_values = True
-            plc_handler.vs_ctrl.capture_image.value = False
-
         # set procImageWidth on vsFront
         if plc_handler.vs_ctrl.vs_front_proc_image_width.new_value_available():
             cam_vs_front.proc_image_width = int(plc_handler.vs_ctrl.vs_front_proc_image_width.value)
@@ -398,6 +348,16 @@ with (contextlib.ExitStack() as stack):
             plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.edge_position
             plc_handler.vs_ctrl.vs_rear_fps.value = cam_vs_rear.fps
 
+        if plc_handler.vs_ctrl.capture_image.value:
+            log_info_general("Send image data....")
+            socket_handler.send_image(
+                image_rear=cam_vs_rear.numpy_image_array,
+                image_front=cam_vs_front.numpy_image_array
+            )
+            vs_front_send_mqtt_image = True
+            vs_rear_send_mqtt_image = True
+            plc_handler.vs_ctrl.capture_image.value = False
+
 
         # if vs_rear_edge_state.new_value_available:
         #     plc_handler.vs_rear_edge_state = vs_rear_edge_state.value
@@ -417,27 +377,19 @@ with (contextlib.ExitStack() as stack):
         #         # plc_handler.stop_film = True
 
 
-        # if vs_front_send_mqtt_image:
-        #     if not vs_front_enable_live_view.value:
-        #         log_info_general("send vsFront image over MQTT")
-        #     if not showOutput:
-        #         cam_vs_front.create_image_info()
-        #     cam_vs_front.create_image_info_jpg()
-        #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, cam_vs_front.image_info_base64)
-        #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageWidth, cam_vs_front.img_width)
-        #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageHeight, cam_vs_front.img_height)
-        #     vs_front_send_mqtt_image = False
-        #
-        # if vs_rear_send_mqtt_image:
-        #     if not vs_rear_enable_live_view.value:
-        #         log_info_general("send vsRear image over MQTT")
-        #     if not showOutput:
-        #         cam_vs_rear.create_image_info()
-        #     cam_vs_rear.create_image_info_jpg()
-        #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, cam_vs_rear.image_info_base64)
-        #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageWidth, cam_vs_rear.img_width)
-        #     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, cam_vs_rear.img_height)
-        #     vs_rear_send_mqtt_image = False
+        if vs_front_send_mqtt_image:
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, cam_vs_front.get_base64_image())
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageWidth, cam_vs_front.img_width)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageHeight, cam_vs_front.img_height)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_image_statistics, str(cam_vs_front.calc_statistics()))
+            vs_front_send_mqtt_image = False
+
+        if vs_rear_send_mqtt_image:
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, cam_vs_rear.get_base64_image())
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageWidth, cam_vs_rear.img_width)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, cam_vs_rear.img_height)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_image_statistics, str(cam_vs_rear.calc_statistics()))
+            vs_rear_send_mqtt_image = False
 
         # if vs_front_send_mqtt_values:
         #     vs_front_stop_offset = vs_front_edge_position.value - cam_vs_front.stop_position
