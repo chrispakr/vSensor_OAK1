@@ -262,7 +262,10 @@ class VisionSensor:
                                           self._image_center_position - self.proc_image_width:self._image_center_position - 50
                                           ]
 
-                self.np_image_tile_right = self._raw_input_image[0:self._stop_position + 50, self._image_center_position + 50:self._image_center_position + self.proc_image_width]
+                self.np_image_tile_right = self._raw_input_image[
+                                           0:self._stop_position + 50,
+                                           self._image_center_position + 50:self._image_center_position + self.proc_image_width
+                                           ]
 
                 self.left_edge_results = self.calc_edge_parameter(self.np_image_tile_left)
                 self.right_edge_results = self.calc_edge_parameter(self.np_image_tile_right)
@@ -440,13 +443,13 @@ class VisionSensor:
 
     def get_base64_image(self):
         try:
-            print("get_base64_image")
-            print(self.proc_image_centered.shape)
-            self.image_info_jpg = jpeg.encode(self.proc_image_centered, quality=80)
+            self._log_info_vsensor("get_base64_image")
+            image_np_color = cv2.cvtColor(self.proc_image_centered, cv2.COLOR_GRAY2RGB)
+            self.image_info_jpg = jpeg.encode(image_np_color, quality=80)
             self.image_info_base64 = base64.b64encode(self.image_info_jpg)
             return self.image_info_base64
         except Exception as e:
-            # self._log_info_vsensor(traceback.format_exc())
+            print(e)
             return None
 
     def calc_statistics(self):
@@ -537,7 +540,7 @@ class VisionSensor:
 
     @property
     def numpy_image_array(self):
-        return self._raw_input_image
+        return self.proc_image_centered
 
     def set_exposure_value(self, exposure):
         self._log_info_vsensor("Set exposure to: {}".format(exposure))
