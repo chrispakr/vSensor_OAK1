@@ -132,6 +132,8 @@ else:
     camera_fps = 45
 
 plc_handler = AdsHandler(local_host_ip="192.168.0.30", route_name="vSensor")
+plc_handler.load_vars_vs_controller()
+
 
 plc_handler.stop_film = False
 
@@ -388,6 +390,7 @@ with (contextlib.ExitStack() as stack):
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, cam_vs_rear.get_base64_image())
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageWidth, cam_vs_rear.img_width)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, cam_vs_rear.img_height)
+            print(cam_vs_rear.calc_statistics())
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_image_statistics, str(cam_vs_rear.calc_statistics()))
             vs_rear_send_mqtt_image = False
 
