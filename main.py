@@ -131,9 +131,10 @@ else:
     log_info_general("No config parameter found for 'FPS' - set standard value of 45")
     camera_fps = 45
 
-plc_handler = AdsHandler(local_host_ip="192.168.0.30", route_name="vSensor")
-plc_handler.load_vars_vs_controller()
 
+plc_handler = AdsHandler(local_host_ip="192.168.0.30", route_name="vSensor")
+plc_handler.load_symbols_vs_controller = True
+plc_handler.connect_to_plc()
 
 plc_handler.stop_film = False
 
