@@ -158,7 +158,7 @@ cam_vs_rear = VisionSensor(
 if config_settings.has_option(vs_front_config_name, "tile_width"):
     cam_vs_front.proc_image_width = config_settings.getint(vs_front_config_name, "tile_width")
 if config_settings.has_option(vs_rear_config_name, "tile_width"):
-    cam_vs_rear.proc_image_width = config_settings.getint(vs_rear_config_name, "tile_width")
+    cam_vs_rear.tile_image_width = config_settings.getint(vs_rear_config_name, "tile_width")
 
 if config_settings.has_option(vs_front_config_name, "stop_position"):
     cam_vs_front.stop_position = config_settings.getint(vs_front_config_name, "stop_position")
@@ -282,28 +282,28 @@ with (contextlib.ExitStack() as stack):
             write_init_config = True
             plc_handler.vs_ctrl.swap_cameras.value = False
 
-        # Check enableLowContrastMode
-        if plc_handler.vs_ctrl.enable_lcm_mode.new_value_available():
-            cam_vs_front.enable_low_contrast_mode = plc_handler.vs_ctrl.enable_lcm_mode.value
-            cam_vs_rear.enable_low_contrast_mode = plc_handler.vs_ctrl.enable_lcm_mode.value
+        # # Check enableLowContrastMode
+        # if plc_handler.vs_ctrl.enable_lcm_mode.new_value_available():
+        #     cam_vs_front.enable_low_contrast_mode = plc_handler.vs_ctrl.enable_lcm_mode.value
+        #     cam_vs_rear.enable_low_contrast_mode = plc_handler.vs_ctrl.enable_lcm_mode.value
 
         # lcm set lcm_slope
-        if plc_handler.vs_ctrl.lcm_slope.new_value_available():
-            cam_vs_front.lcm_slope = plc_handler.vs_ctrl.lcm_slope.value
-            cam_vs_rear.lcm_slope = plc_handler.vs_ctrl.lcm_slope.value
+        if plc_handler.vs_ctrl.slope_threshold.new_value_available():
+            cam_vs_front.slope_threshold = plc_handler.vs_ctrl.slope_threshold.value
+            cam_vs_rear.slope_threshold = plc_handler.vs_ctrl.slope_threshold.value
 
         # lcm set lcm_contrast
-        if plc_handler.vs_ctrl.lcm_contrast_offset.new_value_available():
-            cam_vs_front.lcm_contrast_offset = plc_handler.vs_ctrl.lcm_contrast_offset.value
-            cam_vs_rear.lcm_contrast_offset = plc_handler.vs_ctrl.lcm_contrast_offset.value
+        if plc_handler.vs_ctrl.contrast_offset.new_value_available():
+            cam_vs_front.contrast_offset = plc_handler.vs_ctrl.contrast_offset.value
+            cam_vs_rear.contrast_offset = plc_handler.vs_ctrl.contrast_offset.value
 
 
         if mqtt.isNewMqttValueAvailable(mqtt.sTopics_vsController.get_setOperationMode):
             vs_operation_mode = mqtt.getMqttValue(mqtt.sTopics_vsController.get_setOperationMode)
 
         # set procImageWidth on vsFront
-        if plc_handler.vs_ctrl.vs_front_proc_image_width.new_value_available():
-            cam_vs_front.proc_image_width = int(plc_handler.vs_ctrl.vs_front_proc_image_width.value)
+        if plc_handler.vs_ctrl.vs_front_image_tile_width.new_value_available():
+            cam_vs_front.tile_image_width = int(plc_handler.vs_ctrl.vs_front_image_tile_width.value)
             config_settings.set(
                 section=vs_front_config_name,
                 option="tile_width",
@@ -313,12 +313,12 @@ with (contextlib.ExitStack() as stack):
             vs_front_send_mqtt_image = True
 
         # set procImageWidth on vsRear
-        if plc_handler.vs_ctrl.vs_rear_proc_image_width.new_value_available():
-            cam_vs_rear.proc_image_width = int(plc_handler.vs_ctrl.vs_rear_proc_image_width.value)
+        if plc_handler.vs_ctrl.vs_rear_image_tile_width.new_value_available():
+            cam_vs_rear.tile_image_width = int(plc_handler.vs_ctrl.vs_rear_image_tile_width.value)
             config_settings.set(
                 section=vs_rear_config_name,
                 option="tile_width",
-                value=str(cam_vs_rear.proc_image_width)
+                value=str(cam_vs_rear.tile_image_width)
             )
             write_settings_config = True
             vs_rear_send_mqtt_image = True
