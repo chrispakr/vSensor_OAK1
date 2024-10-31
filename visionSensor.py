@@ -1,13 +1,8 @@
-from __future__ import annotations
-
 import threading
 from datetime import datetime
 from typing import Tuple
-
 from depthai import DeviceInfo
-from numpy.core.defchararray import center
 
-from libs.functions import ValueHandler, ValueHandlerInt
 from collections import deque
 import depthai as dai
 import numpy as np
@@ -22,6 +17,77 @@ from nptyping import NDArray, Bool
 import socket, pickle, struct
 import numpy
 
+class EdgeProcessingParameter:
+    def __init__(self,
+                 stop_position:int = 350,
+                 edge_detection_range:int = 12,
+                 film_type_is_negative:bool = True,
+                 threshold_slope: float = 30.0,
+                 contrast_offset:float = 30.0
+                 ):
+        self.stop_position = stop_position
+        self.edge_detection_range = edge_detection_range
+        self.film_type_is_negative = film_type_is_negative
+        self.slope_threshold = threshold_slope
+        self.contrast_offset = contrast_offset
+
+class ImageProcessingParameter:
+    def __init__(self,
+                 preview_width:int = 800,
+                 tile_center_offset:int = 50,
+                 tile_width:int = 300,
+                 tile_height:int = 350,
+                 contrast_pic_height:int = 20,
+                 contrast_pic_edge_offset:int = 10
+                 ):
+        self._preview_width = preview_width
+        self.contrast_pic_height = contrast_pic_height
+        self.contrast_offset = contrast_pic_edge_offset
+        self._tile_center_offset = tile_center_offset
+        self._tile_width = tile_width
+        self._tile_height = tile_height
+
+    @property
+    def tile_center_offset(self):
+        return self._tile_center_offset
+
+    @tile_center_offset.setter
+    def tile_center_offset(self, value:int):
+        self._tile_center_offset = value
+        if (self._tile_center_offset + self._tile_width) > (self._preview_width // 2):
+            self._tile_width = (self._preview_width // 2) - self._tile_center_offset
+        logger.debug(f"set tile_center_offset to: {self._tile_center_offset}")
+
+    @property
+    def tile_width(self):
+        return self._tile_width
+
+    @tile_width.setter
+    def tile_width(self, value:int):
+        self._tile_width = value
+        if (self._tile_width + self._tile_center_offset) > (self._preview_width // 2):
+            self._tile_center_offset = (self._preview_width // 2) - self._tile_width
+        logger.debug(f"set tile_width to: {self._tile_width}")
+
+    @property
+    def tile_height(self):
+        return self._tile_width
+
+    @tile_width.setter
+    def tile_width(self, value: int):
+        self._tile_height = value
+        logger.debug(f"set tile_height to: {self._tile_width}")
+
+    @property
+    def preview_width(self):
+        return self._preview_width
+
+    @preview_width.setter
+    def preview_width(self, value:int):
+        self._preview_width = value
+        if (self._tile_width + self._tile_center_offset) > (self._preview_width // 2):
+            self._tile_width = (self._preview_width // 2) - self._tile_center_offset
+        logger.debug(f"set preview_width to: {self._preview_width}")
 
 class TilePositionData:
     def __init__(self, param_edge:EdgeProcessingParameter):
@@ -71,77 +137,13 @@ class CalculateContrast:
                            image_tile_left:NDArray,
                            image_tile_right:NDArray,
                            edge_position:int = 0):
-        contrast_max_pos = edge_position - self.param_image.contrast_pic_edge_offset
+        contrast_max_pos = edge_position - self.param_image.contrast_offset
         contrast_min_pos = contrast_max_pos - self.param_image.contrast_pic_height
         image_roi_left = image_tile_left[contrast_min_pos:contrast_max_pos, 0:self.param_image.tile_width]
         image_roi_right = image_tile_right[contrast_min_pos:contrast_max_pos, 0:self.param_image.tile_width]
         self.tile_left = np.median(image_roi_left)
         self.tile_right = np.median(image_roi_right)
         self.total = self.tile_left + self.tile_right
-
-
-class ImageProcessingParameter:
-    def __init__(self,
-                 preview_width:int = 800,
-                 tile_center_offset:int = 50,
-                 tile_width:int = 350,
-                 contrast_pic_height:int = 20,
-                 contrast_pic_edge_offset:int = 10
-                 ):
-        self._preview_width = preview_width
-        self.contrast_pic_height = contrast_pic_height
-        self.contrast_pic_edge_offset = contrast_pic_edge_offset
-        self._tile_center_offset = tile_center_offset
-        self._tile_width = tile_width
-
-    @property
-    def tile_center_offset(self):
-        return self._tile_center_offset
-
-    @tile_center_offset.setter
-    def tile_center_offset(self, value:int):
-        self._tile_center_offset = value
-        if (self._tile_center_offset + self._tile_width) > (self._preview_width // 2):
-            self._tile_width = (self._preview_width // 2) - self._tile_center_offset
-        logger.debug(f"set tile_center_offset to: {self._tile_center_offset}")
-
-    @property
-    def tile_width(self):
-        return self._tile_width
-
-    @tile_width.setter
-    def tile_width(self, value:int):
-        self._tile_width = value
-        if (self._tile_width + self._tile_center_offset) > (self._preview_width // 2):
-            self._tile_center_offset = (self._preview_width // 2) - self._tile_width
-        logger.debug(f"set tile_width to: {self._tile_width}")
-
-    @property
-    def preview_width(self):
-        return self._preview_width
-
-    @preview_width.setter
-    def preview_width(self, value:int):
-        self._preview_width = value
-        if (self._tile_width + self._tile_center_offset) > (self._preview_width // 2):
-            self._tile_width = (self._preview_width // 2) - self._tile_center_offset
-        logger.debug(f"set preview_width to: {self._preview_width}")
-
-
-class EdgeProcessingParameter:
-    def __init__(self,
-                 stop_position:int = 350,
-                 edge_detection_range:int = 12,
-                 film_type_is_negative:bool = True,
-                 threshold_slope: float = 30.0,
-                 contrast_offset:float = 30.0
-                 ):
-        self.stop_position = stop_position
-        self.edge_detection_range = edge_detection_range
-        self.film_type_is_negative = film_type_is_negative
-        self.threshold_slope = threshold_slope
-        self.contrast_offset = contrast_offset
-
 
 class ProcessImageEdgeParameters:
     def __init__(self, param_image:ImageProcessingParameter, param_edge:EdgeProcessingParameter):
@@ -202,10 +204,10 @@ class ProcessImageEdgeParameters:
                 self._arr_slope_total_mean.append(self._total_edge_slope)
 
 
-            if self._total_edge_slope > self.param_edge.threshold_slope:
+            if self._total_edge_slope > self.param_edge.slope_threshold:
                 self._edge_position = (self.left_tile_data.edge_position + self.right_tile_data.edge_position) // 2
 
-            if self._edge_position > (self.param_image.contrast_pic_height + self.param_image.contrast_pic_edge_offset):
+            if self._edge_position > (self.param_image.contrast_pic_height + self.param_image.contrast_offset):
                 self._in_pic_contrast.calculate_contrast(
                     image_tile_left=self.left_tile_data.image_data,
                     image_tile_right=self.right_tile_data.image_data,
@@ -261,11 +263,10 @@ class ProcessImageEdgeParameters:
                               (img_width // 2) + tile_center_offset:(img_width // 2) + tile_width]
         return np_image_tile_left, np_image_tile_right
 
-
 class VisionSensor:
     fps_report_time = 3
-    _contrast_pic_height = 20
-    _contrast_pic_edge_offset = 10
+    # _contrast_pic_height = 20
+    # _contrast_pic_edge_offset = 10
 
     def __init__(self,
                  device_info:DeviceInfo,
@@ -279,6 +280,8 @@ class VisionSensor:
                  ):
         # general Variables
         super().__init__()
+        # self._slope_threshold = None
+        # self._contrast_offset = None
         self.capture_width = capture_width
         self.capture_height = capture_height
         self._image_center_position = image_center_position
@@ -407,8 +410,10 @@ class VisionSensor:
                 self._raw_input_image = self._input_image_data.getCvFrame()
                 (full_image_height, full_image_width) = self._raw_input_image.shape[:2]
                 self.proc_image_centered = self._raw_input_image[
-                                           0:full_image_height, self._image_center_position - (self.param_image.preview_width // 2):
-                                                                self._image_center_position + (self.param_image.preview_width // 2)]
+                                           0:full_image_height,
+                                           self._image_center_position - (self.param_image.preview_width // 2):
+                                           self._image_center_position + (self.param_image.preview_width // 2)
+                                           ]
 
                 self.result.process_image(
                     image_data=self.proc_image_centered
@@ -556,7 +561,6 @@ class VisionSensor:
     def set_exposure_value(self, exposure):
         self._log_info_vsensor("Set exposure to: {}".format(exposure))
         self.camCtrl = dai.CameraControl()
-        # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
         self.camCtrl.setManualExposure(exposure, 100)
         self.camera_control_queue.send(self.camCtrl)
 
@@ -591,33 +595,6 @@ class VisionSensor:
             return None
 
     @property
-    def stop_position(self):
-        return self._stop_position
-
-    @stop_position.setter
-    def stop_position(self, value):
-        self._stop_position = value
-        self._log_info_vsensor("change stop_position to: " + str(self._stop_position))
-
-    # @property
-    # def stop_offset_compensation(self):
-    #     return self._stop_offset_compensation
-
-    # @stop_offset_compensation.setter
-    # def stop_offset_compensation(self, value):
-    #     self._stop_offset_compensation = value
-    #     logger.debug("change stop_offset_compensation to: " + str(self._stop_offset_compensation))
-
-    # @property
-    # def edge_detection_range(self):
-    #     return self._edge_detection_range
-    #
-    # @edge_detection_range.setter
-    # def edge_detection_range(self, value):
-    #     self._edge_detection_range = value
-    #     self._log_info_vsensor("change edge_detection_range to: " + str(self._edge_detection_range))
-
-    @property
     def image_center_position(self):
         return self._image_center_position
 
@@ -627,32 +604,22 @@ class VisionSensor:
         self._log_info_vsensor("change image_center_position to: " + str(self._image_center_position))
 
     @property
-    def lcm_slope(self):
-        return self._lcm_slope
+    def slope_threshold(self):
+        return self.param_edge.slope_threshold
 
-    @lcm_slope.setter
-    def lcm_slope(self, value):
-        self._lcm_slope = value
-        self._log_info_vsensor("set lcm_slope to: " + str(self._lcm_slope))
-
-    @property
-    def lcm_contrast_offset(self):
-        return self._lcm_contrast_offset
-
-    @lcm_contrast_offset.setter
-    def lcm_contrast_offset(self, value):
-        self._lcm_contrast_offset = value
-        self._log_info_vsensor("set lcm_contrast_offset to: " + str(self._lcm_contrast_offset))
+    @slope_threshold.setter
+    def slope_threshold(self, value):
+        self.param_edge.slope_threshold = value
+        self._log_info_vsensor("set lcm_slope to: " + str(self.param_edge.slope_threshold))
 
     @property
-    def enable_low_contrast_mode(self):
-        return self._lcm_contrast_offset
+    def contrast_offset(self):
+        return self.param_image.contrast_offset
 
-    @enable_low_contrast_mode.setter
-    def enable_low_contrast_mode(self, value):
-        self._enabled_lcm = value
-        self._log_info_vsensor("set enable_low_contrast_mode to: " + str(self._enabled_lcm))
-
+    @contrast_offset.setter
+    def contrast_offset(self, value):
+        self.param_edge.contrast_offset = value
+        self._log_info_vsensor("set lcm_contrast_offset to: " + str(self.param_edge.contrast_offset))
 
     def _calc_fps(self):
         while True:
