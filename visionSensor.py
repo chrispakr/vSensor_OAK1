@@ -7,33 +7,23 @@ from collections import deque
 import depthai as dai
 import numpy as np
 from turbojpeg import TurboJPEG
-from enum import Enum
 import platform
 import base64
 import cv2
 import time
 from loguru import logger
-from nptyping import NDArray, Bool
-import socket, pickle, struct
-import numpy
+from nptyping import NDArray
+from icecream import ic
 
-class EdgeProcessingParameter:
-    def __init__(self,
-                 stop_position:int = 350,
-                 edge_detection_range:int = 12,
-                 film_type_is_negative:bool = True,
-                 threshold_slope: float = 30.0,
-                 contrast_offset:float = 30.0
-                 ):
-        self.stop_position = stop_position
-        self.edge_detection_range = edge_detection_range
-        self.film_type_is_negative = film_type_is_negative
-        self.slope_threshold = threshold_slope
-        self.contrast_offset = contrast_offset
 
-class ImageProcessingParameter:
+class VisionSensorSettings:
     def __init__(self,
                  preview_width:int = 800,
+                 camera_center_position:int = 430,
+                 edge_detection_range: int = 12,
+                 film_type_is_negative: bool = True,
+                 slope_threshold: float = 30.0,
+                 contrast_offset: float = 30.0,
                  tile_center_offset:int = 50,
                  tile_width:int = 300,
                  tile_height:int = 350,
@@ -41,8 +31,13 @@ class ImageProcessingParameter:
                  contrast_pic_edge_offset:int = 10
                  ):
         self._preview_width = preview_width
-        self.contrast_pic_height = contrast_pic_height
-        self.contrast_offset = contrast_pic_edge_offset
+        self._camera_center_position = camera_center_position
+        self._edge_detection_range = edge_detection_range
+        self._film_type_is_negative = film_type_is_negative
+        self._slope_threshold = slope_threshold
+        self._contrast_offset = contrast_offset
+        self._contrast_pic_height = contrast_pic_height
+        self._contrast_pic_offset = contrast_pic_edge_offset
         self._tile_center_offset = tile_center_offset
         self._tile_width = tile_width
         self._tile_height = tile_height
@@ -71,12 +66,12 @@ class ImageProcessingParameter:
 
     @property
     def tile_height(self):
-        return self._tile_width
+        return self._tile_height
 
-    @tile_width.setter
-    def tile_width(self, value: int):
+    @tile_height.setter
+    def tile_height(self, value: int):
         self._tile_height = value
-        logger.debug(f"set tile_height to: {self._tile_width}")
+        logger.debug(f"set tile_height to: {self.tile_height}")
 
     @property
     def preview_width(self):
@@ -89,18 +84,82 @@ class ImageProcessingParameter:
             self._tile_width = (self._preview_width // 2) - self._tile_center_offset
         logger.debug(f"set preview_width to: {self._preview_width}")
 
+    @property
+    def slope_threshold(self):
+        return self._slope_threshold
+
+    @slope_threshold.setter
+    def slope_threshold(self, value):
+        self._slope_threshold = value
+        logger.debug(f"set slope_threshold to: {self._slope_threshold}")
+
+    @property
+    def contrast_offset(self):
+        return self._contrast_offset
+
+    @contrast_offset.setter
+    def contrast_offset(self, value):
+        self._contrast_offset = value
+        logger.debug(f"set contrast_offset to: {self._contrast_offset}")
+
+    @property
+    def contrast_pic_height(self):
+        return self._contrast_pic_height
+
+    @contrast_pic_height.setter
+    def contrast_pic_height(self, value):
+        self._contrast_pic_height = value
+        logger.debug(f"set contrast_pic_height to: {self._contrast_pic_height}")
+
+    @property
+    def contrast_pic_offset(self):
+        return self._contrast_pic_offset
+
+    @contrast_pic_offset.setter
+    def contrast_pic_offset(self, value):
+        self._contrast_pic_offset = value
+        logger.debug(f"set contrast_pic_offset to: {self._contrast_pic_offset}")
+
+    @property
+    def camera_center_position(self):
+        return self._camera_center_position
+
+    @camera_center_position.setter
+    def camera_center_position(self, value):
+        self._camera_center_position = value
+        logger.debug(f"set image_center_position to: {self._camera_center_position}")
+
+    @property
+    def edge_detection_range(self):
+        return self._edge_detection_range
+
+    @edge_detection_range.setter
+    def edge_detection_range(self, value):
+        self._edge_detection_range = value
+        logger.debug(f"set edge_detection_range to: {self._edge_detection_range}")
+
+    @property
+    def film_type_is_negative(self):
+        return self._film_type_is_negative
+
+    @film_type_is_negative.setter
+    def film_type_is_negative(self, value):
+        self._film_type_is_negative = value
+        logger.debug(f"set edge_detection_range to: {self._film_type_is_negative}")
+
+
 class TilePositionData:
-    def __init__(self, param_edge:EdgeProcessingParameter):
+    def __init__(self, vs_settings:VisionSensorSettings, image_data=None):
+        self.image_data = None
         self.edge_position:int = 0
         self.edge_slope:int = 0
-        self.image_data = None
         self._edge_result = None
-        self._param_edge = param_edge
+        self._vs_settings = vs_settings
 
     def calc_edge_parameter(self):
         if self.image_data is not None:
             self._edge_result = self._calc_edge_parameter(image_data=self.image_data)
-            if self._param_edge.film_type_is_negative:
+            if self._vs_settings.film_type_is_negative:
                 self.edge_position = self._edge_result[3]
                 self.edge_slope = self._edge_result[1]
             else:
@@ -126,35 +185,36 @@ class TilePositionData:
         else:
             return None
 
+
 class CalculateContrast:
-    def __init__(self, param_image:ImageProcessingParameter):
+    def __init__(self, vs_settings:VisionSensorSettings):
         self.tile_left:float = 0.0
         self.tile_right:float = 0.0
         self.total:float = 0.0
-        self.param_image = param_image
+        self.vs_settings = vs_settings
 
     def calculate_contrast(self,
                            image_tile_left:NDArray,
                            image_tile_right:NDArray,
                            edge_position:int = 0):
-        contrast_max_pos = edge_position - self.param_image.contrast_offset
-        contrast_min_pos = contrast_max_pos - self.param_image.contrast_pic_height
-        image_roi_left = image_tile_left[contrast_min_pos:contrast_max_pos, 0:self.param_image.tile_width]
-        image_roi_right = image_tile_right[contrast_min_pos:contrast_max_pos, 0:self.param_image.tile_width]
+        contrast_max_pos = edge_position - self.vs_settings.contrast_pic_offset
+        contrast_min_pos = contrast_max_pos - self.vs_settings.contrast_pic_height
+        image_roi_left = image_tile_left[contrast_min_pos:contrast_max_pos, 0:self.vs_settings.tile_width]
+        image_roi_right = image_tile_right[contrast_min_pos:contrast_max_pos, 0:self.vs_settings.tile_width]
         self.tile_left = np.median(image_roi_left)
         self.tile_right = np.median(image_roi_right)
         self.total = self.tile_left + self.tile_right
 
+
 class ProcessImageEdgeParameters:
-    def __init__(self, param_image:ImageProcessingParameter, param_edge:EdgeProcessingParameter):
+    def __init__(self, vs_settings:VisionSensorSettings):
         self.image_data = None
         self.image_width:int = 0
         self.image_height:int = 0
         self.edge_position: int = 0
-        self.param_image = param_image
-        self.param_edge = param_edge
-        self.left_tile_data = TilePositionData(param_edge=self.param_edge)
-        self.right_tile_data = TilePositionData(param_edge=self.param_edge)
+        self._vs_settings = vs_settings
+        self.left_tile_data = TilePositionData(vs_settings=self._vs_settings)
+        self.right_tile_data = TilePositionData(vs_settings=self._vs_settings)
         self._edge_position_tile_diff:int = 0
         self._total_edge_slope:float = 0.0
         self._total_contrast_offset: float = 0.0
@@ -164,8 +224,8 @@ class ProcessImageEdgeParameters:
         self._slope_diff_falling:float = 0.0
         self._new_edge_detected:bool = False
         self._edge_position:int = 0
-        self._in_pic_contrast = CalculateContrast(param_image=self.param_image)
-        self._out_pic_contrast = CalculateContrast(param_image=self.param_image)
+        self._in_pic_contrast = CalculateContrast(vs_settings=self._vs_settings)
+        self._out_pic_contrast = CalculateContrast(vs_settings=self._vs_settings)
         self._edge_detected: bool = False
         self._edge_in_position: bool = False
 
@@ -177,9 +237,7 @@ class ProcessImageEdgeParameters:
 
             self.left_tile_data.image_data, self.right_tile_data.image_data = self._get_image_tiles(
                 image_data=self.image_data,
-                stop_position=self.param_edge.stop_position,
-                tile_width=self.param_image.tile_width,
-                tile_center_offset=self.param_image.tile_center_offset
+                vs_settings=self._vs_settings
             )
 
             self.left_tile_data.calc_edge_parameter()
@@ -204,10 +262,10 @@ class ProcessImageEdgeParameters:
                 self._arr_slope_total_mean.append(self._total_edge_slope)
 
 
-            if self._total_edge_slope > self.param_edge.slope_threshold:
+            if self._total_edge_slope > self._vs_settings.slope_threshold:
                 self._edge_position = (self.left_tile_data.edge_position + self.right_tile_data.edge_position) // 2
 
-            if self._edge_position > (self.param_image.contrast_pic_height + self.param_image.contrast_offset):
+            if self._edge_position > (self._vs_settings.contrast_pic_height + self._vs_settings.contrast_offset):
                 self._in_pic_contrast.calculate_contrast(
                     image_tile_left=self.left_tile_data.image_data,
                     image_tile_right=self.right_tile_data.image_data,
@@ -220,21 +278,16 @@ class ProcessImageEdgeParameters:
                     edge_position=self._edge_position
                 )
 
-            if self.param_edge.film_type_is_negative:
-                if self._in_pic_contrast.total + self.param_edge.contrast_offset < self._out_pic_contrast.total:
+            if self._vs_settings.film_type_is_negative:
+                if self._in_pic_contrast.total + self._vs_settings.contrast_offset < self._out_pic_contrast.total:
                     self._edge_detected = True
                 else:
                     self._edge_detected = False
             else:
-                if self._in_pic_contrast.total + self.param_edge.contrast_offset > self._out_pic_contrast.total:
+                if self._in_pic_contrast.total + self._vs_settings.contrast_offset > self._out_pic_contrast.total:
                     self._edge_detected = True
                 else:
                     self._edge_detected = False
-
-            if (self.param_edge.stop_position - (self.param_edge.edge_detection_range // 2)) < self._edge_position < (self.param_edge.stop_position + (self.param_edge.edge_detection_range // 2)):
-                self._edge_in_position = True
-            else:
-                self._edge_in_position = False
 
             if not self._edge_detected and not self._edge_in_position:
                 self.edge_position = -1
@@ -250,40 +303,35 @@ class ProcessImageEdgeParameters:
     @staticmethod
     def _get_image_tiles(
             image_data:NDArray,
-            stop_position:int,
-            tile_width:int,
-            tile_center_offset:int=50) -> Tuple[NDArray, NDArray]:
+            vs_settings:VisionSensorSettings,
+    ) -> Tuple[NDArray, NDArray]:
         img_height, img_width = image_data.shape[:2]
         np_image_tile_left = image_data[
-                             0:stop_position + 50,
-                             (img_width // 2) - tile_width:(img_width // 2) - tile_center_offset]
+                             0:vs_settings.tile_height,
+                             (img_width // 2) - vs_settings.tile_width:(img_width // 2) - vs_settings.tile_center_offset]
 
         np_image_tile_right = image_data[
-                              0:stop_position + 50,
-                              (img_width // 2) + tile_center_offset:(img_width // 2) + tile_width]
+                              0:vs_settings.tile_height,
+                              (img_width // 2) + vs_settings.tile_center_offset:(img_width // 2) + vs_settings.tile_width]
         return np_image_tile_left, np_image_tile_right
 
 class VisionSensor:
     fps_report_time = 3
-    # _contrast_pic_height = 20
-    # _contrast_pic_edge_offset = 10
 
     def __init__(self,
                  device_info:DeviceInfo,
                  is_front_sensor:bool,
                  vs_name:str,
+                 camera_capture_width: int,
+                 camera_capture_height: int,
+                 image_center_position: int,
+                 lens_position: int,
                  fps:int = 60,
-                 capture_width:int = 860,
-                 capture_height:int = 600,
-                 image_center_position:int = 430,
-                 lens_position:int = 130,
                  ):
         # general Variables
         super().__init__()
-        # self._slope_threshold = None
-        # self._contrast_offset = None
-        self.capture_width = capture_width
-        self.capture_height = capture_height
+        self.camera_capture_width = camera_capture_width
+        self.camera_capture_height = camera_capture_height
         self._image_center_position = image_center_position
         self._lens_position = lens_position
         self.set_fps = fps
@@ -296,18 +344,16 @@ class VisionSensor:
         self.name = vs_name
         self.device_info = device_info
 
-        self.param_image = ImageProcessingParameter()
-        self.param_edge = EdgeProcessingParameter()
+        self.settings = VisionSensorSettings()
 
         self.result = ProcessImageEdgeParameters(
-            param_image=self.param_image,
-            param_edge=self.param_edge,
+            vs_settings=self.settings,
         )
 
         self._new_image_available = False
 
         # processing image_data variables
-        self._input_image_data = None
+        self._sensor_image_data = None
         self._raw_input_image = None
         self.proc_image_centered = None
 
@@ -325,17 +371,16 @@ class VisionSensor:
 
         # camera control variables
         self.camCtrl = None
-        self.exposure_time = 0
+        self._exposure_time = 0
+        self._iso = 100
 
-        self.af_start_time = datetime.now()
-        self.autoFocusEnabled = False
-        self.autoFocusFinished = False
+        self._af_start_time = datetime.now()
+        self.autofocus_in_progress = False
+        self._cb_autofocus_finished = None
 
-        self.ae_start_time = datetime.now()
-        self.autoExposureEnabled = False
-        self.autoExposureFinished = False
-
-        self.capture_time = time.time()
+        self._ae_start_time = datetime.now()
+        self.auto_exposure_in_progress = False
+        self._cb_auto_exposure_finished = None
 
         self.thread_fps = threading.Thread(target=self._calc_fps)
         self.thread_fps.daemon = True
@@ -346,6 +391,7 @@ class VisionSensor:
         self.image_edge_queue = None
         self.camera_control_queue = None
         self._log_info_vsensor(f"init camera {self.device_info}")
+        self._log_info_vsensor(self.settings.__dict__)
         if platform.system() == "Windows":
             logger.info(f"set parameters for windows-system")
             self.jpeg = TurboJPEG("libs/libturbojpeg.dll")
@@ -376,7 +422,7 @@ class VisionSensor:
 
         # Properties
         self.camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
-        self.camRgb.setPreviewSize(self.capture_width, self.capture_height)
+        self.camRgb.setPreviewSize(self.camera_capture_width, self.camera_capture_height)
         self.camRgb.setFps(self.set_fps)
         # self.camRgb.initialControl.setAutoFocusLensRange(120, 180)
         self.camRgb.initialControl.setManualFocus(150)
@@ -400,52 +446,53 @@ class VisionSensor:
 
     def _process_image(self):
         while True:
-            self._input_image_data = self.image_edge_queue.tryGet()
-            if self._input_image_data is not None:
+            self._sensor_image_data = self.image_edge_queue.tryGet()
+            if self._sensor_image_data is not None:
                 self._fps_counter += 1
                 self.t_start = time.time()
                 self.image_info_jpg = None
                 self.image_info_base64 = None
-                self.capture_time = time.time()
-                self._raw_input_image = self._input_image_data.getCvFrame()
+                self._raw_input_image = self._sensor_image_data.getCvFrame()
                 (full_image_height, full_image_width) = self._raw_input_image.shape[:2]
                 self.proc_image_centered = self._raw_input_image[
                                            0:full_image_height,
-                                           self._image_center_position - (self.param_image.preview_width // 2):
-                                           self._image_center_position + (self.param_image.preview_width // 2)
+                                           self._image_center_position - (self.settings.preview_width // 2):
+                                           self._image_center_position + (self.settings.preview_width // 2)
                                            ]
 
                 self.result.process_image(
                     image_data=self.proc_image_centered
                 )
 
-                if int(self._input_image_data.getExposureTime().total_seconds() * 1000000) != self.exposure_time:
-                    self.exposure_time = int(self._input_image_data.getExposureTime().total_seconds() * 1000000)
-                if self._input_image_data.getLensPosition() != self._lens_position:
-                    self._lens_position = self._input_image_data.getLensPosition()
-                    logger.debug("lens-position changed to: {}".format(self._lens_position))
-                if self.autoFocusEnabled:
-                    if (datetime.now() - self.af_start_time).seconds > 2:
+                if int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000) != self._exposure_time:
+                    self._exposure_time = int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000)
+                if self._sensor_image_data.getLensPosition() != self._lens_position:
+                    self._lens_position = self._sensor_image_data.getLensPosition()
+                    self._log_info_vsensor("lens-position changed to: {}".format(self._lens_position))
+                if self.autofocus_in_progress:
+                    if (datetime.now() - self._af_start_time).seconds > 2:
                         self.camCtrl = dai.CameraControl()
-                        self.focus_position = self._lens_position
+                        self.lens_position = self._lens_position
                         logger.debug("disable AutoFocus")
-                        self.autoFocusEnabled = False
-                        self.autoFocusFinished = True
-                if self.autoExposureEnabled:
-                    logger.debug("exposureTime: {}".format(str(self.exposure_time)))
-                    if (datetime.now() - self.ae_start_time).seconds > 2:
+                        self.autofocus_in_progress = False
+                        if self._cb_autofocus_finished is not None:
+                            self._cb_autofocus_finished()
+                if self.auto_exposure_in_progress:
+                    logger.debug("exposureTime: {}".format(str(self._exposure_time)))
+                    if (datetime.now() - self._ae_start_time).seconds > 2:
                         self.camCtrl = dai.CameraControl()
                         self.camCtrl.setAutoExposureLock(True)
                         logger.debug("disable AutoExposure")
                         self.camera_control_queue.send(self.camCtrl)
-                        self.autoExposureEnabled = False
-                        self.autoExposureFinished = True
+                        self.auto_exposure_in_progress = False
+                        if self._cb_auto_exposure_finished is not None:
+                            self._cb_auto_exposure_finished()
 
                 self._new_image_available = True
             time.sleep(0.0001)
 
     @staticmethod
-    def _get_image_tiles(self, image:NDArray, stop_position:int, proc_image_width:int, center_offset:int=50) -> Tuple[NDArray, NDArray]:
+    def _get_image_tiles(image:NDArray, stop_position:int, proc_image_width:int, center_offset:int=50) -> Tuple[NDArray, NDArray]:
         img_height, img_width = image.shape[:2]
         np_image_tile_left = image[
                              0:stop_position + 50,
@@ -514,20 +561,10 @@ class VisionSensor:
             mean, std_dev = cv2.meanStdDev(stat_image_full)
 
             # flatten mean and std to obtain a vector and obtain the single value in it.
-            print(image_min, image_max, clip_min, clip_max, round(mean.flatten()[0], 3), round(std_dev.flatten()[0], 3))
-            return (image_min, image_max, clip_min, clip_max, round(mean.flatten()[0], 3), round(std_dev.flatten()[0], 3))
+            # print(image_min, image_max, clip_min, clip_max, round(mean.flatten()[0], 3), round(std_dev.flatten()[0], 3))
+            return image_min, image_max, clip_min, clip_max, round(mean.flatten()[0], 3), round(std_dev.flatten()[0], 3)
         else:
             return None
-
-    def auto_focus_camera(self):
-        self._log_info_vsensor("start AutoFocus on Camera...")
-        self.autoFocusFinished = False
-        self.autoFocusEnabled = True
-        self.af_start_time = datetime.now()
-        self.camCtrl = dai.CameraControl()
-        self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_PICTURE)
-        self.camCtrl.setAutoFocusTrigger()
-        self.camera_control_queue.send(self.camCtrl)
 
     @property
     def new_image_available(self):
@@ -542,41 +579,57 @@ class VisionSensor:
         pass
 
     @property
-    def focus_position(self):
-        # self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
+    def lens_position(self):
         return self._lens_position
 
-    @focus_position.setter
-    def focus_position(self, lens_position):
-        self._log_info_vsensor("Set lens-position to: {}".format(lens_position))
+    @lens_position.setter
+    def lens_position(self, value):
+        self._lens_position = value
+        logger.debug(f"Set lens-position to: {self._lens_position}")
         self.camCtrl = dai.CameraControl()
         self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
-        self.camCtrl.setManualFocus(lens_position)
+        self.camCtrl.setManualFocus(self._lens_position)
         self.camera_control_queue.send(self.camCtrl)
 
     @property
     def numpy_image_array(self):
         return self.proc_image_centered
 
-    def set_exposure_value(self, exposure):
-        self._log_info_vsensor("Set exposure to: {}".format(exposure))
+    @property
+    def exposure_time(self):
+        return self._exposure_time
+
+    @exposure_time.setter
+    def exposure_time(self, value:int):
+        self._exposure_time = value
+        self._log_info_vsensor(f"Set value to: {self._exposure_time}")
         self.camCtrl = dai.CameraControl()
-        self.camCtrl.setManualExposure(exposure, 100)
+        self.camCtrl.setManualExposure(self._exposure_time, self._iso)
         self.camera_control_queue.send(self.camCtrl)
 
-    def auto_exposure_camera(self):
+    def auto_exposure_camera(self, cb_auto_exposure_finished=None):
         self._log_info_vsensor("Sensor Auto-Exposure...")
-        self.autoExposureEnabled = True
-        self.ae_start_time = datetime.now()
+        self._cb_auto_exposure_finished = cb_auto_exposure_finished
+        self.auto_exposure_in_progress = True
+        self._ae_start_time = datetime.now()
         self.camCtrl = dai.CameraControl()
         self.camCtrl.setAutoExposureLock(False)
         self.camCtrl.setAutoExposureEnable()
         self.camera_control_queue.send(self.camCtrl)
 
+    def auto_focus_camera(self, cb_autofocus_finished=None):
+        self._log_info_vsensor("start AutoFocus on Camera...")
+        self._cb_autofocus_finished = cb_autofocus_finished
+        # self._autofocus_finished = False
+        self.autofocus_in_progress = True
+        self._af_start_time = datetime.now()
+        self.camCtrl = dai.CameraControl()
+        self.camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_PICTURE)
+        self.camCtrl.setAutoFocusTrigger()
+        self.camera_control_queue.send(self.camCtrl)
+
     @staticmethod
     def calc_edge_parameter(image):
-        start_time = time.time()
-        slope_and_pos_output = ([0, 0, 0, 0])
         if image is not None:
             reduced = np.mean(image, axis=1)
             # compute the slope values at +/-3
@@ -594,33 +647,6 @@ class VisionSensor:
         else:
             return None
 
-    @property
-    def image_center_position(self):
-        return self._image_center_position
-
-    @image_center_position.setter
-    def image_center_position(self, value):
-        self._image_center_position = value
-        self._log_info_vsensor("change image_center_position to: " + str(self._image_center_position))
-
-    @property
-    def slope_threshold(self):
-        return self.param_edge.slope_threshold
-
-    @slope_threshold.setter
-    def slope_threshold(self, value):
-        self.param_edge.slope_threshold = value
-        self._log_info_vsensor("set lcm_slope to: " + str(self.param_edge.slope_threshold))
-
-    @property
-    def contrast_offset(self):
-        return self.param_image.contrast_offset
-
-    @contrast_offset.setter
-    def contrast_offset(self, value):
-        self.param_edge.contrast_offset = value
-        self._log_info_vsensor("set lcm_contrast_offset to: " + str(self.param_edge.contrast_offset))
-
     def _calc_fps(self):
         while True:
             self.fps = self._fps_counter
@@ -631,3 +657,8 @@ class VisionSensor:
         message = str(message)
         log_message = f"[{self.name}]" + " - " + message
         logger.info(log_message)
+
+    def _log_debug_vsensor(self, message):
+        message = str(message)
+        log_message = f"[{self.name}]" + " - " + message
+        logger.debug(log_message)
