@@ -11,10 +11,9 @@ from datetime import timedelta
 import mqtt_handler.mqtt_communication_handler_v2 as mqtt_communication_handler
 from ads_handler.ads_handler import AdsHandler
 from visionSensor import VisionSensor
-from socket_handler import SocketHandler
+from libs.socket_handler import SocketHandler
 from loguru import logger
 from libs.init_file_handler import InitFileHandler
-from icecream import ic
 
 logger.add(sys.stderr, format="{time} {level} | {message}", filter="my_module", level="INFO")
 logger.add("visionSensor.log")
@@ -30,6 +29,8 @@ logger.info(f"HOME DIRECTORY: {home_dir}")
 logger.info(f"INITIALIZATION FILE: {init_config_file}")
 
 live_view_fps_divider = 2
+vs_front_live_view_frame_nr = 0
+vs_rear_live_view_frame_nr = 0
 
 vs_front_send_mqtt_image = False
 vs_rear_send_mqtt_image = False
@@ -77,15 +78,26 @@ time.sleep(2)
 
 plc_handler.stop_film = False
 plc_handler.vs_ctrl.vs_front_image_center_position.value = init_config.vs_front.center_position
-plc_handler.vs_ctrl.vs_rear_image_center_position.value = init_config.vs_rear.center_position
 plc_handler.vs_ctrl.vs_front_lens_position.value = init_config.vs_front.lens_position
-plc_handler.vs_ctrl.vs_rear_lens_position.value = init_config.vs_rear.lens_position
 plc_handler.vs_ctrl.vs_front_serial_nr.value = init_config.vs_front.serial
+plc_handler.vs_ctrl.vs_front_raw_image_height.value = init_config.vs_front.raw_image_height
+plc_handler.vs_ctrl.vs_front_raw_image_width.value = init_config.vs_front.raw_image_width
+plc_handler.vs_ctrl.vs_front_raw_image_height_offset.value = init_config.vs_front.raw_image_height_offset
+plc_handler.vs_ctrl.vs_front_raw_image_width_offset.value = init_config.vs_front.raw_image_width_offset
+
+
+plc_handler.vs_ctrl.vs_rear_image_center_position.value = init_config.vs_rear.center_position
+plc_handler.vs_ctrl.vs_rear_lens_position.value = init_config.vs_rear.lens_position
 plc_handler.vs_ctrl.vs_rear_serial_nr.value = init_config.vs_rear.serial
+plc_handler.vs_ctrl.vs_rear_raw_image_height.value = init_config.vs_rear.raw_image_height
+plc_handler.vs_ctrl.vs_rear_raw_image_width.value = init_config.vs_rear.raw_image_width
+plc_handler.vs_ctrl.vs_rear_raw_image_height_offset.value = init_config.vs_rear.raw_image_height_offset
+plc_handler.vs_ctrl.vs_rear_raw_image_width_offset.value = init_config.vs_rear.raw_image_width_offset
+
+
 
 cam_vs_front = VisionSensor(
     device_info_front_sensor,
-    is_front_sensor=True,
     vs_name="vs_front",
     camera_capture_width=init_config.vs_front.capture_width,
     camera_capture_height=init_config.vs_front.capture_height,
@@ -96,7 +108,6 @@ cam_vs_front = VisionSensor(
 
 cam_vs_rear = VisionSensor(
     device_info=device_info_rear_sensor,
-    is_front_sensor=False,
     vs_name="vs_rear",
     camera_capture_width=init_config.vs_rear.capture_width,
     camera_capture_height=init_config.vs_rear.capture_height,
@@ -108,15 +119,15 @@ cam_vs_rear = VisionSensor(
 
 
 def cb_film_type_is_negative(value):
-    print(value)
+    logger.info(f"set film_type_is_negative to: {value}")
     cam_vs_front.film_type_is_negative = value
     cam_vs_rear.film_type_is_negative = value
     if value:
-        cam_vs_front.exposure_time = init_config.general.exposure_value_negative
-        cam_vs_rear.exposure_time = init_config.general.exposure_value_negative
+        cam_vs_front.exposure_time = init_config.general.exposure_time_negative
+        cam_vs_rear.exposure_time = init_config.general.exposure_time_negative
     else:
-        cam_vs_front.exposure_time = init_config.general.exposure_value_positive
-        cam_vs_rear.exposure_time = init_config.general.exposure_value_positive
+        cam_vs_front.exposure_time = init_config.general.exposure_time_positive
+        cam_vs_rear.exposure_time = init_config.general.exposure_time_positive
 
 def cb_auto_exposure_cameras_finished():
     if not cam_vs_front.auto_exposure_in_progress and not cam_vs_rear.auto_exposure_in_progress:
@@ -142,7 +153,7 @@ def cb_auto_focus_finished():
 
 def cb_auto_exposure_cameras(value):
     if value:
-        logger.info(f"ADS: Start AutoExposure....")
+        logger.info(f"Start AutoExposure...")
         plc_handler.vs_ctrl.is_ready.value = False
         cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
         cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
@@ -150,9 +161,9 @@ def cb_auto_exposure_cameras(value):
 
 def cb_auto_focus_cameras(value):
     if value:
-        logger.info("ADS: Start AutoFocus Cameras....")
+        logger.info("Start AutoFocus Cameras...")
         plc_handler.vs_ctrl.is_ready.value = False
-        cam_vs_front.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
+        # cam_vs_front.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
         cam_vs_rear.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
         plc_handler.vs_ctrl.auto_focus_cameras.value = False
 
@@ -186,13 +197,13 @@ def cb_vs_rear_image_tile_height(value):
     cam_vs_rear.settings.tile_height = int(value)
 
 def cb_vs_front_image_center_position(value):
-    cam_vs_front.image_center_position = int(value)
-    init_config.vs_front.center_position = cam_vs_front.image_center_position
+    cam_vs_front.settings.camera_center_position = int(value)
+    init_config.vs_front.center_position = cam_vs_front.settings.camera_center_position
     init_config.save_config()
 
 def cb_vs_rear_image_center_position(value):
-    cam_vs_rear.image_center_position = int(value)
-    init_config.vs_rear.center_position = cam_vs_rear.image_center_position
+    cam_vs_rear.settings.camera_center_position = int(value)
+    init_config.vs_rear.center_position = cam_vs_rear.settings.camera_center_position
     init_config.save_config()
 
 def cb_edge_detection_range(value):
@@ -207,23 +218,140 @@ def cb_contrast_pic_edge_offset(value):
     cam_vs_front.contrast_pic_edge_offset = int(value)
     cam_vs_rear.contrast_pic_edge_offset = int(value)
 
+def cb_live_view(value):
+    logger.info(f"set enable_live_view to: {type(value)}")
 
-plc_handler.vs_ctrl.film_type_is_negative.set_cb_new_value(t_cb_new_value=cb_film_type_is_negative)
-plc_handler.vs_ctrl.auto_exposure_cameras.set_cb_new_value(t_cb_new_value=cb_auto_exposure_cameras)
-plc_handler.vs_ctrl.auto_focus_cameras.set_cb_new_value(t_cb_new_value=cb_auto_focus_cameras)
-plc_handler.vs_ctrl.slope_threshold.set_cb_new_value(t_cb_new_value=cb_slope_threshold)
-plc_handler.vs_ctrl.swap_cameras.set_cb_new_value(t_cb_new_value=cb_swap_cameras)
-plc_handler.vs_ctrl.image_tile_center_offset.set_cb_new_value(t_cb_new_value=cb_image_tile_center_offset)
-plc_handler.vs_ctrl.contrast_offset.set_cb_new_value(t_cb_new_value=cb_contrast_offset)
-plc_handler.vs_ctrl.vs_front_image_tile_width.set_cb_new_value(t_cb_new_value=cb_vs_front_image_tile_width)
-plc_handler.vs_ctrl.vs_rear_image_tile_width.set_cb_new_value(t_cb_new_value=cb_vs_rear_image_tile_width)
-plc_handler.vs_ctrl.vs_front_image_tile_height.set_cb_new_value(t_cb_new_value=cb_vs_front_image_tile_height)
-plc_handler.vs_ctrl.vs_rear_image_tile_height.set_cb_new_value(t_cb_new_value=cb_vs_rear_image_tile_height)
-plc_handler.vs_ctrl.vs_front_image_center_position.set_cb_new_value(t_cb_new_value=cb_vs_front_image_center_position)
-plc_handler.vs_ctrl.vs_rear_image_center_position.set_cb_new_value(t_cb_new_value=cb_vs_rear_image_center_position)
-plc_handler.vs_ctrl.edge_detection_range.set_cb_new_value(t_cb_new_value=cb_edge_detection_range)
-plc_handler.vs_ctrl.contrast_pic_height.set_cb_new_value(t_cb_new_value=cb_contrast_pic_height)
-plc_handler.vs_ctrl.contrast_pic_edge_offset.set_cb_new_value(t_cb_new_value=cb_contrast_pic_edge_offset)
+def cb_vs_rear_raw_image_height(value):
+    cam_vs_front._raw_image_height = value
+    cam_vs_rear._raw_image_height = value
+    init_config.vs_front.raw_image_height = value
+    init_config.vs_rear.raw_image_height = value
+    init_config.save_config()
+
+def cb_vs_rear_raw_image_width(value):
+    cam_vs_front._raw_image_width = value
+    cam_vs_rear._raw_image_width = value
+    init_config.vs_front.raw_image_width = value
+    init_config.vs_rear.raw_image_width = value
+    init_config.save_config()
+
+def cb_vs_rear_raw_image_height_offset(value):
+    cam_vs_rear._raw_image_height_offset = value
+    init_config.vs_rear.raw_image_height_offset = value
+    init_config.save_config()
+
+def cb_vs_rear_raw_image_width_offset(value):
+    cam_vs_rear._raw_image_width_offset = value
+    init_config.vs_rear.raw_image_width_offset = value
+    init_config.save_config()
+
+def cb_vs_front_raw_image_height(value):
+    cam_vs_front._raw_image_height = value
+    cam_vs_rear._raw_image_height = value
+    init_config.vs_front.raw_image_height = value
+    init_config.vs_rear.raw_image_height = value
+    init_config.save_config()
+
+def cb_vs_front_raw_image_width(value):
+    cam_vs_front._raw_image_width = value
+    cam_vs_rear._raw_image_width = value
+    init_config.vs_front.raw_image_width = value
+    init_config.vs_rear.raw_image_width = value
+    init_config.save_config()
+
+def cb_vs_front_raw_image_height_offset(value):
+    cam_vs_front._raw_image_height_offset = value
+    init_config.vs_front.raw_image_height_offset = value
+    init_config.save_config()
+
+def cb_vs_front_raw_image_width_offset(value):
+    cam_vs_front._raw_image_width_offset = value
+    init_config.vs_front.raw_image_width_offset = value
+    init_config.save_config()
+
+plc_handler.vs_ctrl.film_type_is_negative.set_cb_new_value(
+    t_cb_new_value=cb_film_type_is_negative
+)
+plc_handler.vs_ctrl.auto_exposure_cameras.set_cb_new_value(
+    t_cb_new_value=cb_auto_exposure_cameras
+)
+plc_handler.vs_ctrl.auto_focus_cameras.set_cb_new_value(
+    t_cb_new_value=cb_auto_focus_cameras
+)
+plc_handler.vs_ctrl.slope_threshold.set_cb_new_value(
+    t_cb_new_value=cb_slope_threshold
+)
+plc_handler.vs_ctrl.swap_cameras.set_cb_new_value(
+    t_cb_new_value=cb_swap_cameras
+)
+plc_handler.vs_ctrl.image_tile_center_offset.set_cb_new_value(
+    t_cb_new_value=cb_image_tile_center_offset
+)
+plc_handler.vs_ctrl.contrast_offset.set_cb_new_value(
+    t_cb_new_value=cb_contrast_offset
+)
+plc_handler.vs_ctrl.vs_front_image_tile_width.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_image_tile_width
+)
+plc_handler.vs_ctrl.vs_rear_image_tile_width.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_image_tile_width
+)
+plc_handler.vs_ctrl.vs_front_image_tile_height.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_image_tile_height
+)
+plc_handler.vs_ctrl.vs_rear_image_tile_height.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_image_tile_height
+)
+plc_handler.vs_ctrl.vs_front_image_center_position.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_image_center_position
+)
+plc_handler.vs_ctrl.vs_rear_image_center_position.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_image_center_position
+)
+plc_handler.vs_ctrl.edge_detection_range.set_cb_new_value(
+    t_cb_new_value=cb_edge_detection_range
+)
+plc_handler.vs_ctrl.contrast_pic_height.set_cb_new_value(
+    t_cb_new_value=cb_contrast_pic_height
+)
+plc_handler.vs_ctrl.contrast_pic_edge_offset.set_cb_new_value(
+    t_cb_new_value=cb_contrast_pic_edge_offset
+)
+plc_handler.vs_ctrl.enable_live_view.set_cb_new_value(
+    t_cb_new_value=cb_live_view
+)
+
+plc_handler.vs_ctrl.vs_rear_raw_image_height.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_raw_image_height
+)
+
+plc_handler.vs_ctrl.vs_rear_raw_image_width.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_raw_image_width
+)
+
+plc_handler.vs_ctrl.vs_rear_raw_image_height_offset.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_raw_image_height_offset
+)
+
+plc_handler.vs_ctrl.vs_rear_raw_image_width_offset.set_cb_new_value(
+    t_cb_new_value=cb_vs_rear_raw_image_width_offset
+)
+
+plc_handler.vs_ctrl.vs_front_raw_image_height.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_raw_image_height
+)
+
+plc_handler.vs_ctrl.vs_front_raw_image_width.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_raw_image_width
+)
+
+plc_handler.vs_ctrl.vs_front_raw_image_height_offset.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_raw_image_height_offset
+)
+
+plc_handler.vs_ctrl.vs_front_raw_image_width_offset.set_cb_new_value(
+    t_cb_new_value=cb_vs_front_raw_image_width_offset
+)
 
 
 logger.info(f"Connect to MQTT-Broker...")
@@ -234,10 +362,11 @@ tl = Timeloop()
 @tl.job(interval=timedelta(seconds=3))
 def mqtt_heartbeat():
     mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsController_heartbeat, 3)
+    logger.debug(f"{cam_vs_rear.proc_image_roi.shape[:2]} // {cam_vs_front.proc_image_roi.shape[:2]}")
 
 tl.start()
 
-socket_handler = SocketHandler(host="192.168.0.30", port=4001, logger=logging)
+socket_handler = SocketHandler(host="192.168.0.30", port=4001)
 
 
 with (contextlib.ExitStack() as stack):
@@ -251,28 +380,32 @@ with (contextlib.ExitStack() as stack):
             if plc_handler.vs_ctrl.enable_live_view.value:
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
                     socket_handler.send_image(
-                        image_rear=cam_vs_rear.numpy_image_array,
-                        image_front=cam_vs_front.numpy_image_array
+                        vs_front_slope_data=cam_vs_front.results,
+                        vs_rear_slope_data=cam_vs_rear.results,
                     )
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
-            if abs(cam_vs_front.result.edge_position - vs_front_last_edge_position) > 1:
-                plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.result.edge_position
-                vs_front_last_edge_position = cam_vs_front.result.edge_position
+            if abs(cam_vs_front.results.result_mean.edge_position - vs_front_last_edge_position) > 1:
+                vs_front_last_edge_position = cam_vs_front.results.result_mean.edge_position
+            if plc_handler.vs_ctrl.vs_front_update_edge_state.value:
+                plc_handler.vs_ctrl.vs_front_edge_state = cam_vs_front.results.result_mean.edge_state
+                plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.results.result_mean.edge_position
             plc_handler.vs_ctrl.vs_front_fps.value = cam_vs_front.fps
 
         if cam_vs_rear.new_image_available:
-            if abs(cam_vs_rear.result.edge_position - vs_rear_last_edge_position) > 1:
-                plc_handler.vs_ctrl.vs_front_edge_position.value = cam_vs_front.result.edge_position
-                vs_rear_last_edge_position = cam_vs_rear.result.edge_position
-            plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.result.edge_position
+            if abs(cam_vs_rear.results.result_mean.edge_position - vs_rear_last_edge_position) > 1:
+                plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.results.result_mean.edge_position
+                vs_rear_last_edge_position = cam_vs_rear.results.result_mean.edge_position
+            if plc_handler.vs_ctrl.vs_rear_update_edge_state.value:
+                plc_handler.vs_ctrl.vs_rear_edge_state = cam_vs_rear.results.result_mean.edge_state
+                plc_handler.vs_ctrl.vs_rear_edge_position.value = cam_vs_rear.results.result_mean.edge_position
             plc_handler.vs_ctrl.vs_rear_fps.value = cam_vs_rear.fps
 
         if plc_handler.vs_ctrl.capture_image.value:
             logger.debug(f"Send image_data data....")
             socket_handler.send_image(
-                image_rear=cam_vs_rear.numpy_image_array,
-                image_front=cam_vs_front.numpy_image_array
+                vs_front_slope_data=cam_vs_front.results,
+                vs_rear_slope_data=cam_vs_rear.results,
             )
             vs_front_send_mqtt_image = True
             vs_rear_send_mqtt_image = True
@@ -280,15 +413,15 @@ with (contextlib.ExitStack() as stack):
 
         if vs_front_send_mqtt_image:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, cam_vs_front.get_base64_image())
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageWidth, cam_vs_front.result.image_width)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageHeight, cam_vs_front.result.image_height)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageWidth, cam_vs_front.results.image_width)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageHeight, cam_vs_front.results.image_height)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_image_statistics, str(cam_vs_front.calc_statistics()))
             vs_front_send_mqtt_image = False
 
         if vs_rear_send_mqtt_image:
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, cam_vs_rear.get_base64_image())
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageWidth, cam_vs_rear.result.image_width)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, cam_vs_rear.result.image_height)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageWidth, cam_vs_rear.results.image_width)
+            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, cam_vs_rear.results.image_height)
             mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_image_statistics, str(cam_vs_rear.calc_statistics()))
             vs_rear_send_mqtt_image = False
 
