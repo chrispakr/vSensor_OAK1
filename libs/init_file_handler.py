@@ -5,11 +5,14 @@ import configparser as cp
 class VsInitConfigObject:
     def __init__(self):
         self.serial:str = ""
-        self.capture_width:int = 860
-        self.capture_height:int = 600
+        self.capture_width:int = 1012
+        self.capture_height:int = 760
         self.lens_position:int = 130
-        self.center_position:int = 430
-
+        self.center_position:int = 420
+        self.raw_image_width: int = 700
+        self.raw_image_height: int = 300
+        self.raw_image_height_offset: int = 0
+        self.raw_image_width_offset: int = 0
 
 class GeneralConfigObject:
     def __init__(self):
@@ -42,11 +45,19 @@ class InitFileHandler:
             self.vs_front.capture_height = self._config.getint(section='vs_front', option='capture_height')
             self.vs_front.lens_position = self._config.getint(section='vs_front', option='lens_position')
             self.vs_front.center_position = self._config.getint(section='vs_front', option='center_position')
+            self.vs_front.raw_image_width = self._config.getint(section='vs_front', option='raw_image_width')
+            self.vs_front.raw_image_height = self._config.getint(section='vs_front', option='raw_image_height')
+            self.vs_front.raw_image_height_offset = self._config.getint(section='vs_front', option='raw_image_height_offset')
+            self.vs_front.raw_image_width_offset = self._config.getint(section='vs_front', option='raw_image_width_offset')
             self.vs_rear.serial = self._config.get(section='vs_rear', option='serial')
             self.vs_rear.capture_width = self._config.getint(section='vs_rear', option='capture_width')
             self.vs_rear.capture_height = self._config.getint(section='vs_rear', option='capture_height')
             self.vs_rear.lens_position = self._config.getint(section='vs_rear', option='lens_position')
             self.vs_rear.center_position = self._config.getint(section='vs_rear', option='center_position')
+            self.vs_rear.raw_image_width = self._config.getint(section='vs_rear', option='raw_image_width')
+            self.vs_rear.raw_image_height = self._config.getint(section='vs_rear', option='raw_image_height')
+            self.vs_rear.raw_image_height_offset = self._config.getint(section='vs_rear', option='raw_image_height_offset')
+            self.vs_rear.raw_image_width_offset = self._config.getint(section='vs_rear', option='raw_image_width_offset')
             self.general.fps = self._config.getint(section='general', option='fps')
             self.general.exposure_time_positive = self._config.getint(section='general', option='exposure_time_positive')
             self.general.exposure_time_negative = self._config.getint(section='general', option='exposure_time_negative')
