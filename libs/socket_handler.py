@@ -2,6 +2,7 @@ import socket, pickle, struct
 import threading
 import time
 import numpy as np
+from loguru import logger
 
 
 class ActiveSocketConnections:
@@ -17,8 +18,7 @@ class ActiveSocketConnections:
         return self._active_connections
 
 class SocketHandler:
-    def __init__(self, host, port, logger, max_listeners=3):
-        self.logger = logger
+    def __init__(self, host, port, max_listeners=3):
         self.host_ip = host
         self.host_port = port
         self.max_listeners = max_listeners
@@ -26,9 +26,8 @@ class SocketHandler:
         self._server_socket = None
         self._conn = None
         self._addr = None
-        self.socket_data = None
-        self._t_image_rear = None
-        self._t_image_front = None
+        self._vs_front_process_data = None
+        self._vs_rear_process_data = None
         self._client_connected = False
         self._start_transfer = False
         self.s_thread = threading.Thread(target=self._bg_task)
@@ -37,21 +36,26 @@ class SocketHandler:
 
     def _bg_task(self):
         self.socketOpen()
+        logger.debug("Socket thread started")
         while True:
             try:
-                if self._t_image_front is not None and self._t_image_rear is not None:
-                    socket_data = {"image_front" : self._t_image_front, "image_rear" : self._t_image_rear}
+                if self._vs_front_process_data is not None and self._vs_rear_process_data is not None:
+                    # logger.debug("Sending images")
+                    socket_data = {
+                        "vs_front_data" : self._vs_front_process_data,
+                        "vs_rear_data" : self._vs_rear_process_data
+                    }
                     a = pickle.dumps(socket_data)
                     message = struct.pack("Q", len(a)) + a
                     self._conn.sendall(message)
-                    self._t_image_rear = None
-                    self._t_image_front = None
+                    self._vs_rear_process_data = None
+                    self._vs_front_process_data = None
 
             except Exception as e:
-                self._log_info(e)
+                logger.info(e)
                 self._client_connected = False
                 self.socketClose()
-                time.sleep(1)
+                time.sleep(3)
                 self.s_thread = threading.Thread(target=self._bg_task)
                 self.s_thread.start()
                 break
@@ -63,24 +67,24 @@ class SocketHandler:
         self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._server_socket.bind((self.host_ip, self.host_port))
         self._server_socket.listen(1)
-        self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is open')
+        logger.info(f"Server socket [ TCP_IP: {self.host_ip}, TCP_PORT: {self.host_port}] is open")
         self._conn, self._addr = self._server_socket.accept()
         self._client_connected = True
-        self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is connected with client')
+        logger.info(f"Server socket [ TCP_IP: {self.host_ip}, TCP_PORT: {self.host_port}] is connected with client")
 
     def socketClose(self):
         self._server_socket.close()
-        self._log_info(u'Server socket [ TCP_IP: ' + self.host_ip + ', TCP_PORT: ' + str(self.host_port) + ' ] is close')
+        logger.info(f"Server socket [ TCP_IP: {self.host_ip}, TCP_PORT: {self.host_port}] is close")
 
-    def send_image(self, image_rear, image_front):
-        self._t_image_rear = image_rear
-        self._t_image_front = image_front
+    def send_image(
+            self,
+            vs_front_slope_data,
+            vs_rear_slope_data,
+    ):
+        self._vs_front_process_data = vs_front_slope_data
+        self._vs_rear_process_data = vs_rear_slope_data
+
 
     @property
     def client_connected(self):
         return self._client_connected
-
-    def _log_info(self, message):
-        message = str(message)
-        log_message = f"[sHandler]" + " - " + message
-        self.logger.info(log_message)
