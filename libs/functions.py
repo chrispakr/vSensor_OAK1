@@ -1,4 +1,5 @@
 import time
+import os
 
 def str2bool(v):
     v = str(v)
@@ -87,3 +88,37 @@ class ValueHandlerInt:
             self.new_value_available = True
         else:
             self.new_value_available = False
+
+class IntervalTimer:
+    def __init__(self, interval):
+        self.interval = interval
+        self.last_time = time.perf_counter()
+
+    def reset(self):
+        self.last_time = time.perf_counter()
+
+    def is_time_to_update(self):
+        now = time.perf_counter()
+        if now - self.last_time > self.interval:
+            self.last_time = now
+            return True
+        else:
+            return False
+
+def delete_old_files(directory, days=3):
+    now = time.time()
+    cutoff = now - (days * 86400)
+
+    for filename in os.listdir(directory):
+        file_path = os.path.join(directory, filename)
+
+        if os.path.isfile(file_path):
+            file_creation_time = os.path.getctime(file_path)
+            file_date = filename.split("-")
+            # print(file_date)
+
+
+            # # Löschen Sie die Datei, wenn sie älter als 'cutoff' ist
+            # if file_creation_time < cutoff:
+            #     print(f"Lösche: {file_path}")
+            #     os.remove(file_path)
