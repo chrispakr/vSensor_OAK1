@@ -1,8 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
+hiddenimports_loguru = collect_submodules('loguru')
+#hidden_imports_h5py = collect_submodules('h5py')
+#all_hidden_imports = hiddenimports_tensorflow + hidden_imports_h5py
 
 a = Analysis(
     ['main.py'],
@@ -11,7 +14,7 @@ a = Analysis(
     datas=[
         ('*.dt', '.')
     ],
-    hiddenimports=[],
+    hiddenimports=hiddenimports_loguru,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
