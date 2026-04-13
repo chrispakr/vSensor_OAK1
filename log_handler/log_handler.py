@@ -1,6 +1,7 @@
 import os
 import logging
 import logging.config
+from logging.handlers import RotatingFileHandler
 from collections import deque
 os.environ['KIVY_LOG_MODE'] = 'PYTHON'
 
@@ -22,7 +23,11 @@ def setup_logger(logger_name, logfile):
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
     # create file handler which logs even debug messages
-    file_handler = logging.FileHandler(logfile)
+    file_handler = RotatingFileHandler(
+        logfile,
+        maxBytes=10_000_000,  # 10 MB
+        backupCount=5
+    )
     file_handler.setLevel(logging.INFO)
     # create console handler with a higher log level
     stream_handler = logging.StreamHandler()
