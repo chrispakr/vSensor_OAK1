@@ -27,6 +27,9 @@ INIT_CONFIG_FILE = os.path.join(FULL_CONFIG_DIR, "init.json")
 if not os.path.exists(FULL_CONFIG_DIR):
     os.makedirs(FULL_CONFIG_DIR)
 
+if not os.path.exists(FULL_LOG_DIR):
+    os.mkdir(FULL_LOG_DIR)
+
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 main_logger = log_handler.setup_logger(
@@ -395,7 +398,7 @@ tl = Timeloop()
 
 @tl.job(interval=timedelta(seconds=3))
 def mqtt_heartbeat():
-    mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsController_heartbeat, 3)
+    mqtt.pTopics_vsController.set_vsController_heartbeat.value = 3
 
 tl.start()
 
@@ -405,7 +408,7 @@ cam_vs_rear.is_running = True
 cam_vs_front.is_running = True
 
 def exit_handler():
-    plc_handler.close_plc_connection()
+    # plc_handler.
     main_logger.info("Cleaning up")
 
 def kill_handler(*args):
@@ -462,17 +465,17 @@ with (contextlib.ExitStack() as stack):
             plc_handler.vs_ctrl.capture_image.value = False
 
         if vs_front_send_mqtt_image:
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_imageData, cam_vs_front.get_base64_image())
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageWidth, cam_vs_front.results.image_width)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_getImageHeight, cam_vs_front.results.image_height)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsFront_image_statistics, str(cam_vs_front.calc_statistics()))
+            mqtt.pTopics_vsController.set_vsFront_imageData.value = cam_vs_front.get_base64_image()
+            mqtt.pTopics_vsController.set_vsFront_getImageWidth.value = cam_vs_front.results.image_width
+            mqtt.pTopics_vsController.set_vsFront_getImageHeight.value = cam_vs_front.results.image_height
+            mqtt.pTopics_vsController.set_vsFront_image_statistics.value =  str(cam_vs_front.calc_statistics())
             vs_front_send_mqtt_image = False
 
         if vs_rear_send_mqtt_image:
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_imageData, cam_vs_rear.get_base64_image())
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageWidth, cam_vs_rear.results.image_width)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_getImageHeight, cam_vs_rear.results.image_height)
-            mqtt.setMqttValue(mqtt.pTopics_vsController.set_vsRear_image_statistics, str(cam_vs_rear.calc_statistics()))
+            mqtt.pTopics_vsController.set_vsRear_imageData.value = cam_vs_rear.get_base64_image()
+            mqtt.pTopics_vsController.set_vsRear_getImageWidth.value = cam_vs_rear.results.image_width
+            mqtt.pTopics_vsController.set_vsRear_getImageHeight.value = cam_vs_rear.results.image_height
+            mqtt.pTopics_vsController.set_vsRear_image_statistics.value = str(cam_vs_rear.calc_statistics())
             vs_rear_send_mqtt_image = False
 
         time.sleep(0.0001)
