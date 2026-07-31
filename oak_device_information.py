@@ -20,13 +20,13 @@ for info in infos:
     # Converts enum eg. 'XLinkDeviceState.X_LINK_UNBOOTED' to 'UNBOOTED'
     state = str(info.state).split('X_LINK_')[1]
 
-    print(f"Found device '{info.name}', MxId: '{info.mxid}', State: '{state}'")
+    print(f"Found device '{info.name}', MxId: '{info.getDeviceId()}', State: '{state}'")
 
 
 # Connect to a specific devices. We will just take the first one
 for info in infos:
     print(f"\nBooting the first available camera ({info.name})...")
-    with dai.Device(dai.Pipeline(), info, usb2Mode=False) as device:
+    with dai.Device(info) as device:
         print("Available camera sensors: ", device.getCameraSensorNames())
         calib = device.readCalibration()
         eeprom = calib.getEepromData()
