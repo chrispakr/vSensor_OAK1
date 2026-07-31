@@ -34,7 +34,7 @@ class ActiveSocketConnections:
 class SocketHandler:
     def __init__(self, host: str, port: int, max_listeners: int = 3) -> None:
         """Initialize the socket handler with connection parameters."""
-        self.logger = logging.getLogger(f"base.{self.__class__.__name__}")
+        self.logger = logging.getLogger(f"main.{self.__class__.__name__}")
         self.host_ip = host
         self.host_port = port
         self.max_listeners = max_listeners
