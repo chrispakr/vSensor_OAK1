@@ -1,6 +1,6 @@
 from collections import deque
 from typing import Tuple
-from nptyping import NDArray
+from numpy.typing import NDArray
 from dataclasses import dataclass
 import logging
 import numpy as np
