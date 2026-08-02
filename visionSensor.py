@@ -23,7 +23,7 @@ class VisionSensor:
                  camera_capture_height: int,
                  image_center_position: int,
                  lens_position: int,
-                 warp_factor: int = 55,
+                 warp_factor: float = 0.8,  # 55
                  exposure_time: int = 1200,
                  raw_image_crop_top: int = 0,
                  raw_image_height: int = 370,
@@ -118,44 +118,55 @@ class VisionSensor:
         self._pipeline = dai.Pipeline(self._device)
 
         # Define sources and outputs
-        self._camRgb = self._pipeline.create(dai.node.ColorCamera)
+        self._camRgb = self._pipeline.create(dai.node.Camera).build(
+            dai.CameraBoardSocket.CAM_A,
+            (2024, 1520),
+            float(self.set_fps),
+        )
         self._manip_edge_detection = self._pipeline.create(dai.node.ImageManip)
 
         # Properties
         self.logger.info(f"set camera-properties")
         self.logger.info(f"camera-capture_width: {self._camera_capture_width}")
         self.logger.info(f"camera-capture_height: {self._camera_capture_height}")
-        self._camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_2024X1520)
-        self._camRgb.setPreviewSize(self._camera_capture_width, self._camera_capture_height)
-        self._camRgb.setFps(self.set_fps)
         self._camRgb.initialControl.setManualFocus(self.settings.lens_position)
         self._camRgb.initialControl.setManualExposure(self.settings.exposure_time, self._iso)
         self._camRgb.setImageOrientation(dai.CameraImageOrientation.ROTATE_180_DEG)
         if self._flip_image:
             self._camRgb.setImageOrientation(dai.CameraImageOrientation.VERTICAL_FLIP)
-        self._camRgb.setInterleaved(False)
-        _max_frame_size = self._camRgb.getPreviewWidth() * self._camRgb.getPreviewHeight() * 3
-
-        self._manip_edge_detection.initialConfig.addCrop(
-            dai.Rect(0.09, 0.1, 0.82, 0.55), True
+        _camera_output = self._camRgb.requestOutput(
+            (self._camera_capture_width, self._camera_capture_height),
+            dai.ImgFrame.Type.BGR888p,
+            dai.ImgResizeMode.STRETCH,
+            float(self.set_fps),
         )
+        _max_frame_size = self._camera_capture_width * self._camera_capture_height * 3
 
         self._manip_edge_detection.setMaxOutputFrameSize(_max_frame_size)
         self._manip_edge_detection.initialConfig.setFrameType(dai.ImgFrame.Type.GRAY8)
 
         ref_width, ref_height = 1024, 520
-        p1 = dai.Point2f(self._warp_factor / ref_width, 0)
-        p2 = dai.Point2f((ref_width - self._warp_factor) / ref_width, 0)
-        p3 = dai.Point2f(0, 1)
-        p4 = dai.Point2f(1, 1)
+        p1 = dai.Point2f(self._warp_factor, 0)
+        p2 = dai.Point2f(ref_width - self._warp_factor, 0)
+        p3 = dai.Point2f(0, ref_height)
+        p4 = dai.Point2f(ref_width, ref_height)
         self._manip_edge_detection.initialConfig.addTransformFourPoints(
             [p1, p2, p3, p4],
-            [dai.Point2f(0, 0), dai.Point2f(1, 0), dai.Point2f(0, 1), dai.Point2f(1, 1)],
-            True,
+            [
+                dai.Point2f(0, 0),
+                dai.Point2f(ref_width, 0),
+                dai.Point2f(0, ref_height),
+                dai.Point2f(ref_width, ref_height),
+            ],
+            False,
+        )
+
+        self._manip_edge_detection.initialConfig.addCrop(
+            dai.Rect(0.09, 0.1, 0.82, 0.55), True
         )
 
         # Links
-        self._camRgb.preview.link(self._manip_edge_detection.inputImage)
+        _camera_output.link(self._manip_edge_detection.inputImage)
 
         self._image_edge_queue = self._manip_edge_detection.out.createOutputQueue(maxSize=4, blocking=True)
         self._camera_control_queue = self._camRgb.inputControl.createInputQueue()
@@ -429,7 +440,7 @@ class VisionSensor:
 
     @lens_position.setter
     def lens_position(self, value):
-        self.settings.len = value
+        self.settings.lens_position = value
         self.logger.debug(f"Set lens-position to: {self.settings.lens_position}")
         self._camCtrl = dai.CameraControl()
         self._camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
