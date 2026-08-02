@@ -402,7 +402,7 @@ with (contextlib.ExitStack() as stack):
 
         if interval_send_edge_position.is_time_to_update():
             if send_vs_front_edge_position:
-                plc_handler.vs_ctrl.vsRightStopPosition.value = cam_vs_front.results.result_mean.edge_position
+                plc_handler.vs_ctrl.vsRightEdgePosition.value = cam_vs_front.results.result_mean.edge_position
             else:
                 plc_handler.vs_ctrl.vsLeftEdgePosition.value = cam_vs_rear.results.result_mean.edge_position
             send_vs_front_edge_position = not send_vs_front_edge_position
