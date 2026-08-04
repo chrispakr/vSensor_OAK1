@@ -23,7 +23,7 @@ class VisionSensor:
                  camera_capture_height: int,
                  image_center_position: int,
                  lens_position: int,
-                 warp_factor: float = 0.8,  # 55
+                 warp_factor: int = 55,  # 55
                  exposure_time: int = 1200,
                  raw_image_crop_top: int = 0,
                  raw_image_height: int = 370,
@@ -137,7 +137,7 @@ class VisionSensor:
         _camera_output = self._camRgb.requestOutput(
             (self._camera_capture_width, self._camera_capture_height),
             dai.ImgFrame.Type.BGR888p,
-            dai.ImgResizeMode.STRETCH,
+            dai.ImgResizeMode.CROP,
             float(self.set_fps),
         )
         _max_frame_size = self._camera_capture_width * self._camera_capture_height * 3
@@ -146,26 +146,40 @@ class VisionSensor:
         self._manip_edge_detection.initialConfig.setFrameType(dai.ImgFrame.Type.GRAY8)
 
         ref_width, ref_height = 1024, 520
-        p1 = dai.Point2f(self._warp_factor, 0)
-        p2 = dai.Point2f(ref_width - self._warp_factor, 0)
-        p3 = dai.Point2f(0, ref_height)
-        p4 = dai.Point2f(ref_width, ref_height)
+        warp_x = 0.05
+        # p1 = dai.Point2f(self._warp_factor, 0)
+        # p2 = dai.Point2f(ref_width - self._warp_factor, 0)
+        # p3 = dai.Point2f(0, ref_height)
+        # p4 = dai.Point2f(ref_width, ref_height)
+        p1 = dai.Point2f(0, 0)
+        p2 = dai.Point2f(ref_width, 0)
+        p3 = dai.Point2f(self._warp_factor, ref_height)
+        p4 = dai.Point2f(ref_width - self._warp_factor, ref_height)
         self._manip_edge_detection.initialConfig.addTransformFourPoints(
-            [p1, p2, p3, p4],
-            [
-                dai.Point2f(0, 0),
-                dai.Point2f(ref_width, 0),
-                dai.Point2f(0, ref_height),
-                dai.Point2f(ref_width, ref_height),
+            src=[
+                dai.Point2f(0.0, 0.0),
+                dai.Point2f(1.0, 0.0),
+                dai.Point2f(1.0, 1.0),
+                dai.Point2f(warp_x, 1.0),
             ],
-            False,
+            dst=[
+                dai.Point2f(0.0, 0.0),
+                dai.Point2f(1.0, 0.0),
+                dai.Point2f(1.0, 1.0),
+                dai.Point2f(0.0, 1.0),
+            ],
+            normalizedCoords=True,
         )
 
-        self._manip_edge_detection.initialConfig.addCrop(
-            dai.Rect(0.09, 0.1, 0.82, 0.55), True
-        )
+        # self._manip_edge_detection.initialConfig.addCrop(
+        #     dai.Rect(0.09, 0.1, 0.82, 0.55), True
+        # )
 
-        # Links
+        # self._manip_edge_detection.initialConfig.addCrop(
+        #     dai.Rect(0.0, 0.0, 0.0, 0.0), True
+        # )
+
+            # Links
         _camera_output.link(self._manip_edge_detection.inputImage)
 
         self._image_edge_queue = self._manip_edge_detection.out.createOutputQueue(maxSize=4, blocking=True)
@@ -182,6 +196,7 @@ class VisionSensor:
                     self._image_info_jpg = None
                     self._image_info_base64 = None
                     self._raw_input_image = self._sensor_image_data.getCvFrame()
+
                     (full_image_height, full_image_width) = self._raw_input_image.shape[:2]
                     self._proc_image_centered = self._raw_input_image[
                                                 0 : full_image_height,
