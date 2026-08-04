@@ -148,7 +148,7 @@ class CalcEdgeSlopeParameter:
         self.slope_data = []
 
     def calculate(self):
-        if self.image_data is not None:
+        if self.image_data is not None and self.image_data.size > 0:
             try:
                 reduced = np.mean(self.image_data, axis=1)
                 self.slope_data = [(reduced[i + 3] - reduced[i - 3]) for i in range(3, len(reduced) - 3, 1)]
@@ -381,11 +381,18 @@ class ProcessImageEdgeParameters:
             vs_settings:VisionSensorSettings,
     ) -> Tuple[NDArray, NDArray]:
         img_height, img_width = image_data.shape[:2]
+        tile_height = max(0, min(vs_settings.tile_height, img_height))
+        # Clamp against the actual image width (not the fixed PREVIEW_WIDTH the
+        # settings are validated against), otherwise a narrower raw_image_width
+        # can push the tile bounds out of range and yield an empty slice.
+        center_offset = max(0, min(vs_settings.tile_center_offset, img_width // 2))
+        tile_width = max(0, min(vs_settings.tile_width, (img_width // 2) - center_offset))
+
         np_image_tile_left = image_data[
-                             0 : vs_settings.tile_height,
-                             (img_width // 2) - vs_settings.tile_width - vs_settings.tile_center_offset : (img_width // 2) - vs_settings.tile_center_offset]
+                             0 : tile_height,
+                             (img_width // 2) - tile_width - center_offset : (img_width // 2) - center_offset]
 
         np_image_tile_right = image_data[
-                              0:vs_settings.tile_height,
-                              (img_width // 2) + vs_settings.tile_center_offset : (img_width // 2) + vs_settings.tile_width + vs_settings.tile_center_offset]
+                              0 : tile_height,
+                              (img_width // 2) + center_offset : (img_width // 2) + tile_width + center_offset]
         return np_image_tile_left, np_image_tile_right
