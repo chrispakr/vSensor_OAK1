@@ -1,5 +1,7 @@
 import time
 import os
+import platform
+import subprocess
 
 def str2bool(v):
     v = str(v)
@@ -11,6 +13,25 @@ def bool2Int(value):
         return 1
     else:
         return 0
+
+
+def wait_for_ping(host, interval=2.0, logger=None):
+    """Block until a single ICMP ping to `host` succeeds, retrying every `interval` seconds."""
+    if platform.system() == "Windows":
+        cmd = ["ping", "-n", "1", "-w", "1000", host]
+    else:
+        cmd = ["ping", "-c", "1", "-W", "1", host]
+    while True:
+        try:
+            result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode == 0:
+                return
+        except OSError as e:
+            if logger is not None:
+                logger.error(f"ping command failed: {e}")
+        if logger is not None:
+            logger.warning(f"no ping response from {host}, retrying in {interval}s...")
+        time.sleep(interval)
 
 
 def print_separator():
