@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import os
+import threading
+from platform import platform
+
 import depthai as dai
 import time
 from datetime import datetime
@@ -30,7 +33,8 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 main_logger = log_handler.setup_logger(
     logger_name="main",
-    logfile=os.path.join(FULL_LOG_DIR, f"log_{timestamp}.log")
+    logfile=os.path.join(FULL_LOG_DIR, f"log_{timestamp}.log"),
+    level="DEBUG",
 )
 
 main_logger.info("Start visionSensorM4")
@@ -67,19 +71,19 @@ time.sleep(2)
 
 main_logger.info("set init values to plc")
 
-plc_handler.vs_ctrl.vsRightLensPosition.value = config_handler.vs_front.lens_position
-plc_handler.vs_ctrl.vsRightSerialNumber.value = config_handler.vs_front.serial
-plc_handler.vs_ctrl.vsRightImageCenterOffset.value = config_handler.vs_front.center_offset
-
-plc_handler.vs_ctrl.vsLeftLensPosition.value = config_handler.vs_rear.lens_position
-plc_handler.vs_ctrl.vsLeftSerialNumber.value = config_handler.vs_rear.serial
-plc_handler.vs_ctrl.vsLeftImageCenterOffset.value = config_handler.vs_rear.center_offset
-
-plc_handler.vs_ctrl.settings.stdExposureTimePositive.value = config_handler.general.exposure_time_positive
-plc_handler.vs_ctrl.settings.stdExposureTimeNegative.value = config_handler.general.exposure_time_negative
-plc_handler.vs_ctrl.rawImageCropTop.value = config_handler.vs_front.raw_image_crop_top
-plc_handler.vs_ctrl.rawImageHeight.value = config_handler.vs_front.raw_image_height
-plc_handler.vs_ctrl.rawImageWidth.value = config_handler.vs_front.raw_image_width
+# plc_handler.vs_ctrl.vsRightLensPosition.value = config_handler.vs_front.lens_position
+# plc_handler.vs_ctrl.vsRightSerialNumber.value = config_handler.vs_front.serial
+# plc_handler.vs_ctrl.vsRightImageCenterOffset.value = config_handler.vs_front.center_offset
+#
+# plc_handler.vs_ctrl.vsLeftLensPosition.value = config_handler.vs_rear.lens_position
+# plc_handler.vs_ctrl.vsLeftSerialNumber.value = config_handler.vs_rear.serial
+# plc_handler.vs_ctrl.vsLeftImageCenterOffset.value = config_handler.vs_rear.center_offset
+#
+# plc_handler.vs_ctrl.settings.stdExposureTimePositive.value = config_handler.general.exposure_time_positive
+# plc_handler.vs_ctrl.settings.stdExposureTimeNegative.value = config_handler.general.exposure_time_negative
+# plc_handler.vs_ctrl.rawImageCropTop.value = config_handler.vs_front.raw_image_crop_top
+# plc_handler.vs_ctrl.rawImageHeight.value = config_handler.vs_front.raw_image_height
+# plc_handler.vs_ctrl.rawImageWidth.value = config_handler.vs_front.raw_image_width
 
 found_front_sensor = False
 found_rear_sensor = False
@@ -94,11 +98,11 @@ if len(devices_found) != 2:
     exit()
 
 for device in devices_found:
-    main_logger.info(f"found sensor ({device.getDeviceId()}) on state: {device.state}")
+    main_logger.info(f"found sensor ({device.getMxId()}) on state: {device.state}")
 
 if config_handler.vs_front.serial and config_handler.vs_rear.serial:
-    found_front_sensor, device_info_front_sensor = dai.Device.getDeviceById(config_handler.vs_front.serial)
-    found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceById(config_handler.vs_rear.serial)
+    found_front_sensor, device_info_front_sensor = dai.Device.getDeviceByMxId(config_handler.vs_front.serial)
+    found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceByMxId(config_handler.vs_rear.serial)
 else:
     if len(devices_found) == 2:
         config_handler.vs_front.serial = devices_found[0].getDeviceId()
@@ -142,15 +146,17 @@ cam_vs_rear = VisionSensor(
 )
 
 def cb_film_type_is_negative(value):
-    main_logger.info(f"set film_type_is_negative to: {value}")
-    cam_vs_front.settings.is_film_type_negative = value
-    cam_vs_rear.settings.is_film_type_negative = value
-    if value:
-        cam_vs_front.exposure_time = config_handler.general.exposure_time_negative
-        cam_vs_rear.exposure_time = config_handler.general.exposure_time_negative
-    else:
-        cam_vs_front.exposure_time = config_handler.general.exposure_time_positive
-        cam_vs_rear.exposure_time = config_handler.general.exposure_time_positive
+    def _apply():
+        main_logger.info(f"set film_type_is_negative to: {value}")
+        cam_vs_front.settings.is_film_type_negative = value
+        cam_vs_rear.settings.is_film_type_negative = value
+        if value:
+            cam_vs_front.exposure_time = config_handler.general.exposure_time_negative
+            cam_vs_rear.exposure_time = config_handler.general.exposure_time_negative
+        else:
+            cam_vs_front.exposure_time = config_handler.general.exposure_time_positive
+            cam_vs_rear.exposure_time = config_handler.general.exposure_time_positive
+    threading.Thread(target=_apply, daemon=True).start()
 
 def cb_auto_exposure_cameras_finished():
     if not cam_vs_front.auto_exposure_in_progress and not cam_vs_rear.auto_exposure_in_progress:
@@ -175,25 +181,31 @@ def cb_auto_focus_finished():
         plc_handler.vs_ctrl.isConnected.value = True
 
 def cb_auto_exposure_cameras(value):
-    if value:
+    def _apply():
         main_logger.info(f"Start AutoExposure...")
         plc_handler.vs_ctrl.isConnected.value = False
         cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
         cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
         plc_handler.vs_ctrl._autoExposureCameras.value = False
+    if value:
+        threading.Thread(target=_apply, daemon=True).start()
 
 def cb_auto_focus_cameras(value):
-    if value:
+    def _apply():
         main_logger.info("Start AutoFocus Cameras...")
         plc_handler.vs_ctrl.isConnected.value = False
         cam_vs_front.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
         cam_vs_rear.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
         plc_handler.vs_ctrl._autoFocusCameras.value = False
+    if value:
+        threading.Thread(target=_apply, daemon=True).start()
 
 def cb_swap_cameras(value):
-    if value:
+    def _apply():
         config_handler.swap_cameras()
         plc_handler.vs_ctrl.swapCameras.value = False
+    if value:
+        threading.Thread(target=_apply, daemon=True).start()
 
 def cb_slope_threshold(value):
     cam_vs_front.settings.slope_threshold = value
@@ -371,7 +383,7 @@ atexit.register(exit_handler)
 signal.signal(signal.SIGINT, kill_handler)
 signal.signal(signal.SIGTERM, kill_handler)
 
-interval_send_edge_position = helper.IntervalTimer(interval=0.05)
+interval_send_edge_position = helper.IntervalTimer(interval=0.01)
 send_vs_front_edge_position = False
 
 vs_front_send_mqtt_image = True
@@ -406,6 +418,10 @@ with (contextlib.ExitStack() as stack):
             else:
                 plc_handler.vs_ctrl.vsLeftEdgePosition.value = cam_vs_rear.results.result_mean.edge_position
             send_vs_front_edge_position = not send_vs_front_edge_position
+
+        # if platform.system() == "Windows":
+        #     pass
+
 
         # if plc_handler.vs_ctrl.captureImage.value:
         #     main_logger.debug(f"Send image_data data....")
