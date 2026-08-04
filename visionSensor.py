@@ -114,78 +114,60 @@ class VisionSensor:
 
 
     def init_camera(self):
-        self._device = dai.Device(self.device_info)
-        self._pipeline = dai.Pipeline(self._device)
+        self._pipeline = None
+        self._pipeline = dai.Pipeline()
 
         # Define sources and outputs
-        self._camRgb = self._pipeline.create(dai.node.Camera).build(
-            dai.CameraBoardSocket.CAM_A,
-            (2024, 1520),
-            float(self.set_fps),
-        )
+        self._camRgb = self._pipeline.create(dai.node.ColorCamera)
         self._manip_edge_detection = self._pipeline.create(dai.node.ImageManip)
+        self._x_out_edge_detection = self._pipeline.create(dai.node.XLinkOut)
+
+        self.controlIn = self._pipeline.create(dai.node.XLinkIn)
+
+        self._x_out_edge_detection.setStreamName('image_edge_detection')
+        self.controlIn.setStreamName('control')
 
         # Properties
         self.logger.info(f"set camera-properties")
         self.logger.info(f"camera-capture_width: {self._camera_capture_width}")
         self.logger.info(f"camera-capture_height: {self._camera_capture_height}")
+        self.logger.info(f"set camera-properties")
+        self.logger.info(f"camera-capture_width: {self._camera_capture_width}")
+        self.logger.info(f"camera-capture_height: {self._camera_capture_height}")
+        self._camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_2024X1520)
+        self._camRgb.setPreviewSize(self._camera_capture_width, self._camera_capture_height)
+        self._camRgb.setFps(self.set_fps)
+        self._camRgb.initialControl.setManualFocus(self.settings.lens_position)
+        self._camRgb.initialControl.setManualExposure(self.settings.exposure_time, self._iso)
         self._camRgb.initialControl.setManualFocus(self.settings.lens_position)
         self._camRgb.initialControl.setManualExposure(self.settings.exposure_time, self._iso)
         self._camRgb.setImageOrientation(dai.CameraImageOrientation.ROTATE_180_DEG)
         if self._flip_image:
             self._camRgb.setImageOrientation(dai.CameraImageOrientation.VERTICAL_FLIP)
-        _camera_output = self._camRgb.requestOutput(
-            (self._camera_capture_width, self._camera_capture_height),
-            dai.ImgFrame.Type.BGR888p,
-            dai.ImgResizeMode.CROP,
-            float(self.set_fps),
+        self._camRgb.setInterleaved(False)
+        _max_frame_size = self._camRgb.getPreviewWidth() * self._camRgb.getPreviewHeight() * 3
+
+        self._manip_edge_detection.initialConfig.setCropRect(
+            xmin=0.09, ymin=0.1, xmax=0.91, ymax=0.65
         )
-        _max_frame_size = self._camera_capture_width * self._camera_capture_height * 3
 
         self._manip_edge_detection.setMaxOutputFrameSize(_max_frame_size)
-        self._manip_edge_detection.initialConfig.setFrameType(dai.ImgFrame.Type.GRAY8)
+        self._manip_edge_detection.initialConfig.setFrameType(dai.RawImgFrame.Type.GRAY8)
 
-        ref_width, ref_height = 1024, 520
-        warp_x = 0.05
-        # p1 = dai.Point2f(self._warp_factor, 0)
-        # p2 = dai.Point2f(ref_width - self._warp_factor, 0)
-        # p3 = dai.Point2f(0, ref_height)
-        # p4 = dai.Point2f(ref_width, ref_height)
-        p1 = dai.Point2f(0, 0)
-        p2 = dai.Point2f(ref_width, 0)
-        p3 = dai.Point2f(self._warp_factor, ref_height)
-        p4 = dai.Point2f(ref_width - self._warp_factor, ref_height)
-        self._manip_edge_detection.initialConfig.addTransformFourPoints(
-            src=[
-                dai.Point2f(0.0, 0.0),
-                dai.Point2f(1.0, 0.0),
-                dai.Point2f(1.0, 1.0),
-                dai.Point2f(warp_x, 1.0),
-            ],
-            dst=[
-                dai.Point2f(0.0, 0.0),
-                dai.Point2f(1.0, 0.0),
-                dai.Point2f(1.0, 1.0),
-                dai.Point2f(0.0, 1.0),
-            ],
-            normalizedCoords=True,
-        )
+        p1 = dai.Point2f(self._warp_factor, 0)
+        p2 = dai.Point2f(1024 - self._warp_factor, 0)
+        p3 = dai.Point2f(0, 520)
+        p4 = dai.Point2f(1024, 520)
+        self._manip_edge_detection.setWarpMesh([p1, p2, p3, p4], 2, 2)
 
-        # self._manip_edge_detection.initialConfig.addCrop(
-        #     dai.Rect(0.09, 0.1, 0.82, 0.55), True
-        # )
+        # Links
+        self._camRgb.preview.link(self._manip_edge_detection.inputImage)
+        self._manip_edge_detection.out.link(self._x_out_edge_detection.input)
+        self.controlIn.out.link(self._camRgb.inputControl)
 
-        # self._manip_edge_detection.initialConfig.addCrop(
-        #     dai.Rect(0.0, 0.0, 0.0, 0.0), True
-        # )
-
-            # Links
-        _camera_output.link(self._manip_edge_detection.inputImage)
-
-        self._image_edge_queue = self._manip_edge_detection.out.createOutputQueue(maxSize=4, blocking=True)
-        self._camera_control_queue = self._camRgb.inputControl.createInputQueue()
-
-        self._pipeline.start()
+        self._device = dai.Device(self._pipeline, self.device_info)
+        self._image_edge_queue = self._device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
+        self._camera_control_queue = self._device.getInputQueue('control')
 
     def _process_image(self):
         while True:
