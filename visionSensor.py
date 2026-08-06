@@ -21,10 +21,11 @@ class VisionSensor:
                  vs_name: str,
                  camera_capture_width: int,
                  camera_capture_height: int,
-                 image_center_position: int,
-                 lens_position: int,
+                 vs_settings: vps.VisionSensorSettings,
+                 # image_center_position: int,
+                 # lens_position: int,
                  warp_factor: int = 55,  # 55
-                 exposure_time: int = 1200,
+                 # exposure_time: int = 1200,
                  raw_image_crop_top: int = 0,
                  raw_image_height: int = 370,
                  raw_image_width: int = 630,
@@ -36,7 +37,6 @@ class VisionSensor:
         # general Variables
         super().__init__()
         self.logger = logging.getLogger("main." + vs_name)
-        self.settings = vps.VisionSensorSettings()
         self._camera_capture_width = camera_capture_width
         self._camera_capture_height = camera_capture_height
         self.raw_image_crop_top = raw_image_crop_top
@@ -45,9 +45,7 @@ class VisionSensor:
         self._raw_image_height_offset = crop_raw_image_bottom
         self._raw_image_width_offset = crop_raw_image_left
         self._flip_image = flip_image
-        self.settings.camera_center_position = image_center_position
-        self.settings.lens_position = lens_position
-        self.settings.exposure_time = exposure_time
+        self.settings = vs_settings
         self._warp_factor = warp_factor
         self.set_fps = fps
         self._manip_edge_detection = None
