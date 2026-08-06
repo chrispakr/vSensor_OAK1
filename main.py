@@ -195,34 +195,6 @@ def cb_auto_focus_finished():
 def cb_live_view(value):
     main_logger.info(f"set enable_live_view to: {type(value)}")
 
-# def cb_vs_front_raw_image_crop_top(value):
-#     cam_vs_front.raw_image_crop_top = value
-#     config_handler.vs_front.raw_image_crop_top = value
-#     config_handler.save_config()
-#
-# def cb_vs_rear_raw_image_height_offset(value):
-#     cam_vs_rear._raw_image_height_offset = value
-#     config_handler.vs_rear.raw_image_height_offset = value
-#     config_handler.save_config()
-#
-# def cb_vs_rear_raw_image_width_offset(value):
-#     cam_vs_rear._raw_image_width_offset = value
-#     config_handler.vs_rear.raw_image_width_offset = value
-#     config_handler.save_config()
-#
-# def cb_vs_front_raw_image_width(value):
-#     cam_vs_front._raw_image_width = value
-#     cam_vs_rear._raw_image_width = value
-#     config_handler.vs_front.raw_image_width = value
-#     config_handler.vs_rear.raw_image_width = value
-#     config_handler.save_config()
-#
-# def cb_vs_front_raw_image_height_offset(value):
-#     cam_vs_front._raw_image_height_offset = value
-#     config_handler.vs_front.raw_image_height_offset = value
-#     config_handler.save_config()
-
-
 def poll_ads_symbols():
     vs_ctrl = plc_handler.vs_ctrl
     if vs_ctrl is None:
@@ -309,23 +281,24 @@ def poll_ads_symbols():
             threading.Thread(target=_apply, daemon=True).start()
 
     if vs_ctrl.isFilmTypeNegative.new_value_available():
-        def _apply():
-            main_logger.info("Start AutoExposure Cameras...")
-            vs_ctrl.isConnected.value = False
-            cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
-            cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
-            vs_ctrl._autoExposureCameras.value = False
-
-        if vs_ctrl._autoExposureCameras.value:
-            threading.Thread(target=_apply, daemon=True).start()
+        value = vs_ctrl.isFilmTypeNegative.value
+        main_logger.info(f"set film_type_is_negative to: {value}")
+        cam_vs_front.settings.is_film_type_negative = value
+        cam_vs_rear.settings.is_film_type_negative = value
+        if value:
+            cam_vs_front.exposure_time = vs_ctrl.settings.stdExposureTimeNegative.value
+            cam_vs_rear.exposure_time = vs_ctrl.settings.stdExposureTimeNegative.value
+        else:
+            cam_vs_front.exposure_time = vs_ctrl.settings.stdExposureTimePositive.value
+            cam_vs_rear.exposure_time = vs_ctrl.settings.stdExposureTimePositive.value
 
     if vs_ctrl.settings.contrastPicHeight.new_value_available():
         cam_vs_front.settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
         cam_vs_rear.settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
 
     if vs_ctrl.settings.contrastPicEdgeOffset.new_value_available():
-        cam_vs_front.settings.contrast_pic_edge_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
-        cam_vs_rear.settings.contrast_pic_edge_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
+        cam_vs_front.settings.contrast_pic_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
+        cam_vs_rear.settings.contrast_pic_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
 
     if vs_ctrl.settings.stdExposureTimeNegative.new_value_available():
         cam_vs_front.settings.std_exposure_time_negative = vs_ctrl.settings.stdExposureTimeNegative.value
