@@ -11,13 +11,13 @@ class VsConfigParameter:
     serial: str = ""
     capture_width: int = 1012
     capture_height: int = 760
-    lens_position: int = 130
-    center_offset: int = 0
+    # lens_position: int = 130
+    # center_offset: int = 0
     raw_image_crop_top: int = 0
     raw_image_width_offset: int = 0
-    warp_factor: int = 55
-    _raw_image_width: int = field(default=700, repr=False)
-    _raw_image_height: int = field(default=400, repr=False)
+    # warp_factor: int = 55
+    # _raw_image_width: int = field(default=700, repr=False)
+    # _raw_image_height: int = field(default=400, repr=False)
 
     MIN_HEIGHT: int = 150
     MAX_HEIGHT: int = 400
@@ -26,25 +26,25 @@ class VsConfigParameter:
     MAX_WIDTH: int = 800
     DEFAULT_WIDTH: int = 700
 
-    @property
-    def raw_image_height(self) -> int:
-        return self._raw_image_height
+    # @property
+    # def raw_image_height(self) -> int:
+    #     return self._raw_image_height
+    #
+    # @raw_image_height.setter
+    # def raw_image_height(self, value: int) -> None:
+    #     if not self.MIN_HEIGHT <= value <= self.MAX_HEIGHT:
+    #         value = self.DEFAULT_HEIGHT
+    #     self._raw_image_height = value
 
-    @raw_image_height.setter
-    def raw_image_height(self, value: int) -> None:
-        if not self.MIN_HEIGHT <= value <= self.MAX_HEIGHT:
-            value = self.DEFAULT_HEIGHT
-        self._raw_image_height = value
-
-    @property
-    def raw_image_width(self) -> int:
-        return self._raw_image_width
-
-    @raw_image_width.setter
-    def raw_image_width(self, value: int) -> None:
-        if not self.MIN_WIDTH <= value <= self.MAX_WIDTH:
-            value = self.DEFAULT_WIDTH
-        self._raw_image_width = value
+    # @property
+    # def raw_image_width(self) -> int:
+    #     return self._raw_image_width
+    #
+    # @raw_image_width.setter
+    # def raw_image_width(self, value: int) -> None:
+    #     if not self.MIN_WIDTH <= value <= self.MAX_WIDTH:
+    #         value = self.DEFAULT_WIDTH
+    #     self._raw_image_width = value
 
 @dataclass
 class GeneralConfigObject:
@@ -64,11 +64,11 @@ class ConfigFileHandler:
     """Handles reading and writing JSON configuration files for the vision system."""
 
     def __init__(self, config_file: Optional[str] = None):
-        self.logger = logging.getLogger("base." + self.__class__.__name__)
-        self.config_filename = config_file
+        self.logger = logging.getLogger("main." + self.__class__.__name__)
+        self.config_path = config_file
         self.config = ConfigData()
 
-        if not os.path.exists(self.config_filename):
+        if not os.path.exists(self.config_path):
             self.logger.info("No init-config found... - create new.")
             self.save_config()
         else:
@@ -77,7 +77,7 @@ class ConfigFileHandler:
     def _load_config(self) -> None:
         """Loads configuration from JSON file."""
         try:
-            with open(self.config_filename, 'r') as f:
+            with open(self.config_path, 'r') as f:
                 data = json.load(f)
 
             # Load front camera config
@@ -123,9 +123,9 @@ class ConfigFileHandler:
             'general': asdict(self.config.general)
         }
 
-        self.logger.info(f"Writing config file to {self.config_filename}")
+        self.logger.info(f"Writing config file to {self.config_path}")
         try:
-            with open(self.config_filename, 'w') as f:
+            with open(self.config_path, 'w') as f:
                 json.dump(config_dict, f, indent=4)
         except Exception as e:
             self.logger.error(f"Error saving config: {e}")
