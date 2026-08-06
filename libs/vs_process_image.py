@@ -63,15 +63,6 @@ class VisionSensorSettings:
             self._tile_width = (self.PREVIEW_WIDTH // 2) - self._tile_center_offset
         self.logger.info(f"set tile_width to: {self._tile_width}")
 
-    # @property
-    # def tile_height(self):
-    #     return self._tile_height
-    #
-    # @tile_height.setter
-    # def tile_height(self, value: int):
-    #     self._tile_height = value
-    #     self.logger.debug(f"set tile_height to: {self.tile_height}")
-
     @property
     def slope_threshold(self):
         return self._slope_threshold
