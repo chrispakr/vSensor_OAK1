@@ -19,7 +19,7 @@ from visionSensor import VisionSensor
 from libs.socket_handler import SocketHandler
 import log_handler.log_handler as log_handler
 from libs.config_file_handler import ConfigFileHandler
-from libs.vs_process_image import VisionSensorSettings
+from libs.vs_process_image import ProcessEdgeSettings
 
 CONFIG_DIR = ".vSensorM4"
 HOME_DIR = os.path.expanduser('~')
@@ -68,7 +68,6 @@ plc_handler = AdsHandler(
     plc_ip_address=PLC_IP_ADDRESS,
     route_name="vSensorM4",
 )
-# plc_handler.connect_to_plc()
 
 plc_handler.connect()
 
@@ -113,48 +112,41 @@ if not found_front_sensor:
 if not found_rear_sensor:
     raise RuntimeError("RearSensor not found!")
 
-# plc_handler.vs_ctrl.vsRightSerialNumber.value = device_info_front_sensor
-
-vs_front_settings = VisionSensorSettings(
-    camera_center_position=plc_handler.vs_ctrl.vsRightImageCenterOffset.value,
+vs_front_processing_settings = ProcessEdgeSettings(
+    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
+    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
+    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
+    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
+    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
+    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
+    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
+    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
     stop_position=plc_handler.vs_ctrl.vsRightStopPosition.value,
-    edge_detection_range=plc_handler.vs_ctrl.edgeDetectionRange.value,
-    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
-    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
-    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
-    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
-    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
-    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
-    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
-    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
-    exposure_time=plc_handler.vs_ctrl.exposureTime.value,
-    lens_position=plc_handler.vs_ctrl.vsRightLensPosition.value,
-)
-vs_rear_settings = VisionSensorSettings(
-    camera_center_position=plc_handler.vs_ctrl.vsLeftImageCenterOffset.value,
-    stop_position=plc_handler.vs_ctrl.vsLeftStopPosition.value,
-    edge_detection_range=plc_handler.vs_ctrl.edgeDetectionRange.value,
-    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
-    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
-    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
-    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
-    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
-    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
-    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
-    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
-    exposure_time=plc_handler.vs_ctrl.exposureTime.value,
-    lens_position=plc_handler.vs_ctrl.vsLeftLensPosition.value,
+    # stop_offset=plc_handler.vs_ctrl.vsRightStopOffset.value,
 )
 
+vs_rear_processing_settings = ProcessEdgeSettings(
+    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
+    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
+    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
+    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
+    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
+    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
+    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
+    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
+    stop_position=plc_handler.vs_ctrl.vsLeftStopPosition.value,
+    # stop_offset=plc_handler.vs_ctrl.vsLeftStopOffset.value,
+)
 
 cam_vs_front = VisionSensor(
     device_info_front_sensor,
     vs_name="vs_front",
-    vs_settings=vs_front_settings,
+    edge_processing_settings=vs_front_processing_settings,
     camera_capture_width=config_handler.vs_front.capture_width,
     camera_capture_height=config_handler.vs_front.capture_height,
-    # image_center_position=config_handler.vs_front.center_offset,
-    # lens_position=config_handler.vs_front.lens_position,
+    lens_position=plc_handler.vs_ctrl.vsRightLensPosition.value,
+    exposure_time=plc_handler.vs_ctrl.exposureTime.value,
+    camera_center_position=plc_handler.vs_ctrl.vsRightImageCenterOffset.value,
     raw_image_height=plc_handler.vs_ctrl.rawImageHeight.value,
     raw_image_width=plc_handler.vs_ctrl.rawImageWidth.value,
     flip_image=False,
@@ -164,9 +156,12 @@ cam_vs_front = VisionSensor(
 cam_vs_rear = VisionSensor(
     device_info=device_info_rear_sensor,
     vs_name="vs_rear",
-    vs_settings=vs_rear_settings,
+    edge_processing_settings=vs_rear_processing_settings,
     camera_capture_width=config_handler.vs_rear.capture_width,
     camera_capture_height=config_handler.vs_rear.capture_height,
+    lens_position=plc_handler.vs_ctrl.vsLeftLensPosition.value,
+    exposure_time=plc_handler.vs_ctrl.exposureTime.value,
+    camera_center_position=plc_handler.vs_ctrl.vsLeftImageCenterOffset.value,
     raw_image_height=plc_handler.vs_ctrl.rawImageHeight.value,
     raw_image_width=plc_handler.vs_ctrl.rawImageWidth.value,
     flip_image=True,
@@ -214,36 +209,32 @@ def poll_ads_symbols():
         cam_vs_rear.raw_image_crop_top = vs_ctrl.rawImageCropTop.value
 
     if vs_ctrl.vsRightImageCenterOffset.new_value_available():
-        cam_vs_front.settings.camera_center_position = int(vs_ctrl.vsRightImageCenterOffset.value)
+        vs_front_processing_settings.camera_center_position = int(vs_ctrl.vsRightImageCenterOffset.value)
 
     if vs_ctrl.vsLeftImageCenterOffset.new_value_available():
-        cam_vs_rear.settings.camera_center_position = int(vs_ctrl.vsLeftImageCenterOffset.value)
+        cam_vs_rear.edge_processing_settings.camera_center_position = int(vs_ctrl.vsLeftImageCenterOffset.value)
 
     if vs_ctrl.vsRightStopPosition.new_value_available():
-        cam_vs_front.settings.stop_position = int(vs_ctrl.vsRightStopPosition.value)
+        cam_vs_front.edge_processing_settings.stop_position = int(vs_ctrl.vsRightStopPosition.value)
 
     if vs_ctrl.vsLeftStopPosition.new_value_available():
-        cam_vs_rear.settings.stop_position = int(vs_ctrl.vsLeftStopPosition.value)
+        cam_vs_rear.edge_processing_settings.stop_position = int(vs_ctrl.vsLeftStopPosition.value)
 
     if vs_ctrl.slopeThreshold.new_value_available():
-        cam_vs_front.settings.slope_threshold = int(vs_ctrl.slopeThreshold.value)
-        cam_vs_rear.settings.slope_threshold = int(vs_ctrl.slopeThreshold.value)
+        vs_front_processing_settings.slope_threshold = int(vs_ctrl.slopeThreshold.value)
+        vs_rear_processing_settings.slope_threshold = int(vs_ctrl.slopeThreshold.value)
 
     if vs_ctrl.settings.imageTileCenterOffset.new_value_available():
-        cam_vs_front.settings.tile_center_offset = int(vs_ctrl.settings.imageTileCenterOffset.value)
-        cam_vs_rear.settings.tile_center_offset = int(vs_ctrl.settings.imageTileCenterOffset.value)
-
-    if vs_ctrl.settings.imageTileHeight.new_value_available():
-        cam_vs_front.settings.tile_height = int(vs_ctrl.settings.imageTileHeight.value)
-        cam_vs_rear.settings.tile_height = int(vs_ctrl.settings.imageTileHeight.value)
+        vs_front_processing_settings.tile_center_offset = int(vs_ctrl.settings.imageTileCenterOffset.value)
+        vs_rear_processing_settings.tile_center_offset = int(vs_ctrl.settings.imageTileCenterOffset.value)
 
     if vs_ctrl.settings.imageTileWidth.new_value_available():
-        cam_vs_front.settings.tile_width = int(vs_ctrl.settings.imageTileWidth.value)
-        cam_vs_rear.settings.tile_width = int(vs_ctrl.settings.imageTileWidth.value)
+        vs_front_processing_settings.tile_width = int(vs_ctrl.settings.imageTileWidth.value)
+        vs_rear_processing_settings.tile_width = int(vs_ctrl.settings.imageTileWidth.value)
 
     if vs_ctrl.contrastOffset.new_value_available():
-        cam_vs_front.settings.contrast_offset = int(vs_ctrl.contrastOffset.value)
-        cam_vs_rear.settings.contrast_offset = int(vs_ctrl.contrastOffset.value)
+        vs_front_processing_settings.contrast_offset = int(vs_ctrl.contrastOffset.value)
+        vs_rear_processing_settings.contrast_offset = int(vs_ctrl.contrastOffset.value)
 
     if vs_ctrl.swapCameras.new_value_available():
         if vs_ctrl.swapCameras.value:
@@ -251,12 +242,15 @@ def poll_ads_symbols():
             vs_ctrl.swapCameras.value = False
 
     if vs_ctrl.exposureTime.new_value_available():
-        cam_vs_front.exposure_time = vs_ctrl.exposureTime.value
-        cam_vs_rear.exposure_time = vs_ctrl.exposureTime.value
+        def _apply():
+            cam_vs_front.exposure_time = vs_ctrl.exposureTime.value
+            cam_vs_rear.exposure_time = vs_ctrl.exposureTime.value
+        if vs_ctrl.exposureTime.value:
+            threading.Thread(target=_apply, daemon=True).start()
 
     if vs_ctrl.edgeDetectionRange.new_value_available():
-        cam_vs_front.settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
-        cam_vs_rear.settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
+        vs_front_processing_settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
+        vs_rear_processing_settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
 
     if vs_ctrl._autoExposureCameras.new_value_available():
         def _apply():
@@ -283,38 +277,26 @@ def poll_ads_symbols():
     if vs_ctrl.isFilmTypeNegative.new_value_available():
         value = vs_ctrl.isFilmTypeNegative.value
         main_logger.info(f"set film_type_is_negative to: {value}")
-        cam_vs_front.settings.is_film_type_negative = value
-        cam_vs_rear.settings.is_film_type_negative = value
+        vs_front_processing_settings.is_film_type_negative = value
+        vs_rear_processing_settings.is_film_type_negative = value
         if value:
-            cam_vs_front.exposure_time = vs_ctrl.settings.stdExposureTimeNegative.value
-            cam_vs_rear.exposure_time = vs_ctrl.settings.stdExposureTimeNegative.value
+            plc_handler.vs_ctrl.exposureTime.value = plc_handler.vs_ctrl.settings.stdExposureTimeNegative.value
         else:
-            cam_vs_front.exposure_time = vs_ctrl.settings.stdExposureTimePositive.value
-            cam_vs_rear.exposure_time = vs_ctrl.settings.stdExposureTimePositive.value
+            plc_handler.vs_ctrl.exposureTime.value = plc_handler.vs_ctrl.settings.stdExposureTimePositive.value
 
     if vs_ctrl.settings.contrastPicHeight.new_value_available():
-        cam_vs_front.settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
-        cam_vs_rear.settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
+        vs_front_processing_settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
+        vs_rear_processing_settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
 
     if vs_ctrl.settings.contrastPicEdgeOffset.new_value_available():
-        cam_vs_front.settings.contrast_pic_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
-        cam_vs_rear.settings.contrast_pic_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
-
-    if vs_ctrl.settings.stdExposureTimeNegative.new_value_available():
-        cam_vs_front.settings.std_exposure_time_negative = vs_ctrl.settings.stdExposureTimeNegative.value
-        cam_vs_rear.settings.std_exposure_time_negative = vs_ctrl.settings.stdExposureTimeNegative.value
-
-    if vs_ctrl.settings.stdExposureTimePositive.new_value_available():
-        cam_vs_front.settings.std_exposure_time_positive = vs_ctrl.settings.stdExposureTimePositive.value
-        cam_vs_rear.settings.std_exposure_time_positive = vs_ctrl.settings.stdExposureTimePositive.value
+        vs_front_processing_settings.contrast_pic_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
+        vs_rear_processing_settings.contrast_pic_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
 
     if vs_ctrl.vsRightStopOffset.new_value_available():
-        cam_vs_front.settings.stop_position = vs_ctrl.vsRightStopOffset.value
-        cam_vs_rear.settings.stop_position = vs_ctrl.vsRightStopOffset.value
+        vs_front_processing_settings.stop_offset = vs_ctrl.vsRightStopOffset.value
 
     if vs_ctrl.vsLeftStopOffset.new_value_available():
-        cam_vs_front.settings.stop_position = vs_ctrl.vsLeftStopOffset.value
-        cam_vs_rear.settings.stop_position = vs_ctrl.vsLeftStopOffset.value
+        vs_rear_processing_settings.stop_offset = vs_ctrl.vsLeftStopOffset.value
 
 # endregion
 
