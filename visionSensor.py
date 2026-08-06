@@ -21,16 +21,16 @@ class VisionSensor:
                  vs_name: str,
                  camera_capture_width: int,
                  camera_capture_height: int,
-                 vs_settings: vps.VisionSensorSettings,
-                 # image_center_position: int,
-                 # lens_position: int,
+                 edge_processing_settings: vps.ProcessEdgeSettings,
+                 lens_position: int,
+                 camera_center_position: int,
+                 exposure_time: int = 1200,
+                 preview_width: int = 800,
+                 preview_height: int = 600,
                  warp_factor: int = 55,  # 55
-                 # exposure_time: int = 1200,
                  raw_image_crop_top: int = 0,
-                 raw_image_height: int = 370,
-                 raw_image_width: int = 630,
-                 crop_raw_image_bottom: int = 0,
-                 crop_raw_image_left: int = 0,
+                 raw_image_height: int = 380,
+                 raw_image_width: int = 640,
                  flip_image:bool = False,
                  fps: int = 60,
                  ):
@@ -42,10 +42,14 @@ class VisionSensor:
         self.raw_image_crop_top = raw_image_crop_top
         self._raw_image_height = raw_image_height
         self._raw_image_width = raw_image_width
-        self._raw_image_height_offset = crop_raw_image_bottom
-        self._raw_image_width_offset = crop_raw_image_left
         self._flip_image = flip_image
-        self.settings = vs_settings
+        self._lens_position = lens_position
+        self._exposure_time = exposure_time
+        self._requested_exposure_time = exposure_time
+        self._preview_width = preview_width
+        self._preview_height = preview_height
+        self._camera_center_position = camera_center_position
+        self.edge_processing_settings = edge_processing_settings
         self._warp_factor = warp_factor
         self.set_fps = fps
         self._manip_edge_detection = None
@@ -55,7 +59,7 @@ class VisionSensor:
         self.device_info = device_info
 
         self.results = vps.ProcessImageEdgeParameters(
-            vs_settings=self.settings,
+            edge_processing_settings=self.edge_processing_settings,
         )
 
         self._new_image_available = False
@@ -75,8 +79,8 @@ class VisionSensor:
         self._fps_elapsed_time = datetime.now()
 
         # camera control variables
-        self._camCtrl = None
         self._iso = 100
+        self._camera_control_lock = threading.Lock()
 
         self._af_start_time = datetime.now()
         self.autofocus_in_progress = False
@@ -95,7 +99,7 @@ class VisionSensor:
         self._image_edge_queue = None
         self._camera_control_queue = None
         self.logger.info(f"init camera {self.device_info}")
-        self.logger.info(self.settings.__dict__)
+        # self.logger.info(self.settings.__dict__)
         if platform.system() == "Windows":
             self.logger.info(f"set parameters for windows-system")
             self.jpeg = TurboJPEG("libs/libturbojpeg.dll")
@@ -132,11 +136,14 @@ class VisionSensor:
         self.logger.info(f"set camera-properties")
         self.logger.info(f"camera-capture_width: {self._camera_capture_width}")
         self.logger.info(f"camera-capture_height: {self._camera_capture_height}")
+        self.logger.info(f"camera_lens_position: {self._lens_position}")
+        self.logger.info(f"camera_exposure_time: {self._exposure_time}")
+        self.logger.info(f"camera_iso: {self._iso}")
         self._camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_2024X1520)
         self._camRgb.setPreviewSize(self._camera_capture_width, self._camera_capture_height)
         self._camRgb.setFps(self.set_fps)
-        self._camRgb.initialControl.setManualFocus(self.settings.lens_position)
-        self._camRgb.initialControl.setManualExposure(self.settings.exposure_time, self._iso)
+        self._camRgb.initialControl.setManualFocus(self._lens_position)
+        self._camRgb.initialControl.setManualExposure(self._exposure_time, self._iso)
         self._camRgb.setImageOrientation(dai.CameraImageOrientation.ROTATE_180_DEG)
         if self._flip_image:
             self._camRgb.setImageOrientation(dai.CameraImageOrientation.VERTICAL_FLIP)
@@ -165,8 +172,6 @@ class VisionSensor:
         self._image_edge_queue = self._device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
         self._camera_control_queue = self._device.getInputQueue('control')
 
-        self.exposure_time = self.settings.exposure_time
-
     def _process_image(self):
         while True:
             if self.is_running:
@@ -180,8 +185,8 @@ class VisionSensor:
                     (full_image_height, full_image_width) = self._raw_input_image.shape[:2]
                     self._proc_image_centered = self._raw_input_image[
                                                 0 : full_image_height,
-                                                (full_image_width // 2) - self.settings.camera_center_position - (self.settings.PREVIEW_WIDTH // 2):
-                                                (full_image_width // 2) - self.settings.camera_center_position + (self.settings.PREVIEW_WIDTH // 2):
+                                                (full_image_width // 2) - self._camera_center_position - (self._preview_width // 2):
+                                                (full_image_width // 2) - self._camera_center_position + (self._preview_width // 2):
                                                 ]
 
                     (centered_image_height, centered_image_width) = self._proc_image_centered.shape[:2]
@@ -195,26 +200,35 @@ class VisionSensor:
                         image_data=self.proc_image_roi
                     )
 
-                    if int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000) != self.settings.exposure_time:
-                        self.settings.exposure_time = int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000)
-                    if self._sensor_image_data.getLensPosition() != self.settings.lens_position:
-                        self.settings.lens_position = self._sensor_image_data.getLensPosition()
-                        self.logger.info("lens-position changed to: {}".format(self.settings.lens_position))
+                    if int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000) != self._exposure_time:
+                        self._exposure_time = int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000)
+
+                    if not self.auto_exposure_in_progress and self._exposure_time != self._requested_exposure_time:
+                        cam_ctrl = dai.CameraControl()
+                        cam_ctrl.setManualExposure(self._requested_exposure_time, self._iso)
+                        cam_ctrl.setAutoExposureLock(True)
+                        with self._camera_control_lock:
+                            self._camera_control_queue.send(cam_ctrl)
+
+                    if self._sensor_image_data.getLensPosition() != self._lens_position:
+                        self._lens_position = self._sensor_image_data.getLensPosition()
+                        self.logger.info("lens-position changed to: {}".format(self._lens_position))
                     if self.autofocus_in_progress:
                         if (datetime.now() - self._af_start_time).seconds > 2:
-                            self._camCtrl = dai.CameraControl()
-                            self.lens_position = self.settings.lens_position
+                            self.lens_position = self._lens_position
                             self.logger.info("disable AutoFocus")
                             self.autofocus_in_progress = False
                             if self._cb_autofocus_finished is not None:
                                 self._cb_autofocus_finished()
                     if self.auto_exposure_in_progress:
-                        self.logger.debug("exposureTime: {}".format(str(self.settings.exposure_time)))
+                        self.logger.debug("exposureTime: {}".format(str(self._exposure_time)))
                         if (datetime.now() - self._ae_start_time).seconds > 2:
-                            self._camCtrl = dai.CameraControl()
-                            self._camCtrl.setAutoExposureLock(True)
+                            cam_ctrl = dai.CameraControl()
+                            cam_ctrl.setAutoExposureLock(True)
                             self.logger.info("disable AutoExposure")
-                            self._camera_control_queue.send(self._camCtrl)
+                            with self._camera_control_lock:
+                                self._camera_control_queue.send(cam_ctrl)
+                            self._requested_exposure_time = self._exposure_time
                             self.auto_exposure_in_progress = False
                             if self._cb_auto_exposure_finished is not None:
                                 self._cb_auto_exposure_finished()
@@ -367,16 +381,17 @@ class VisionSensor:
 
     @property
     def lens_position(self):
-        return self.settings.lens_position
+        return self._lens_position
 
     @lens_position.setter
     def lens_position(self, value):
-        self.settings.lens_position = value
-        self.logger.debug(f"Set lens-position to: {self.settings.lens_position}")
-        self._camCtrl = dai.CameraControl()
-        self._camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
-        self._camCtrl.setManualFocus(self.settings.lens_position)
-        self._camera_control_queue.send(self._camCtrl)
+        self._lens_position = value
+        self.logger.debug(f"Set lens-position to: {self._lens_position}")
+        cam_ctrl = dai.CameraControl()
+        cam_ctrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
+        cam_ctrl.setManualFocus(self._lens_position)
+        with self._camera_control_lock:
+            self._camera_control_queue.send(cam_ctrl)
 
     @property
     def numpy_image_array(self):
@@ -384,27 +399,24 @@ class VisionSensor:
 
     @property
     def exposure_time(self):
-        return self.settings.exposure_time
+        return self._exposure_time
 
     @exposure_time.setter
     def exposure_time(self, value:int):
-        self.settings.exposure_time = value
-        self.logger.info(f"Set exposure_time to: {self.settings.exposure_time}")
-        self._camCtrl = dai.CameraControl()
-        self._camCtrl.setManualExposure(self.settings.exposure_time, self._iso)
-        self._camera_control_queue.send(self._camCtrl)
-        self._camCtrl.setAutoExposureLock(True)
+        self._requested_exposure_time = int(value)
+        self.logger.info(f"Requested exposure_time: {self._requested_exposure_time}")
 
     def auto_exposure_camera(self, cb_auto_exposure_finished=None):
         self.logger.info("Sensor Auto-Exposure...")
         self._cb_auto_exposure_finished = cb_auto_exposure_finished
         self.auto_exposure_in_progress = True
         self._ae_start_time = datetime.now()
-        self._camCtrl = dai.CameraControl()
-        self._camCtrl.setAutoExposureLock(False)
-        self._camCtrl.setAutoExposureCompensation(-2)
-        self._camCtrl.setAutoExposureEnable()
-        self._camera_control_queue.send(self._camCtrl)
+        cam_ctrl = dai.CameraControl()
+        cam_ctrl.setAutoExposureLock(False)
+        cam_ctrl.setAutoExposureCompensation(-2)
+        cam_ctrl.setAutoExposureEnable()
+        with self._camera_control_lock:
+            self._camera_control_queue.send(cam_ctrl)
 
     def auto_focus_camera(self, cb_autofocus_finished=None):
         self.logger.info(f"start AutoFocus on Camera...")
@@ -412,10 +424,11 @@ class VisionSensor:
         # self._autofocus_finished = False
         self.autofocus_in_progress = True
         self._af_start_time = datetime.now()
-        self._camCtrl = dai.CameraControl()
-        self._camCtrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_PICTURE)
-        self._camCtrl.setAutoFocusTrigger()
-        self._camera_control_queue.send(self._camCtrl)
+        cam_ctrl = dai.CameraControl()
+        cam_ctrl.setAutoFocusMode(dai.CameraControl.AutoFocusMode.CONTINUOUS_PICTURE)
+        cam_ctrl.setAutoFocusTrigger()
+        with self._camera_control_lock:
+            self._camera_control_queue.send(cam_ctrl)
 
     def _calc_fps(self):
         while True:
