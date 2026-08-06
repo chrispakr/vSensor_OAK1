@@ -7,14 +7,11 @@ import numpy as np
 import traceback
 
 
-class VisionSensorSettings:
-    PREVIEW_WIDTH = 800
+class ProcessEdgeSettings:
     def __init__(self,
-                 camera_center_position:int = 430,
-                 stop_position:int = 250,
-                 stop_offset:int = 10,
-                 edge_detection_range: int = 12,
-                 is_film_type_negative: bool = True,
+                 stop_position: int,
+                 stop_offset: int = 0,
+                 preview_width: int = 800,
                  slope_threshold: float = 30.0,
                  contrast_offset: float = 30.0,
                  tile_center_offset:int = 50,
@@ -22,15 +19,11 @@ class VisionSensorSettings:
                  tile_height:int = 350,
                  contrast_pic_height:int = 20,
                  contrast_pic_edge_offset:int = 10,
-                 exposure_time = 0,
-                 lens_position = 0
+                 edge_detection_range:int = 10,
+                 is_film_type_negative:bool = False,
                  ):
         self.logger = logging.getLogger("main." + self.__class__.__name__)
-        self._camera_center_position = camera_center_position
-        self.stop_position = stop_position
-        self.stop_offset = stop_offset
-        self._edge_detection_range = edge_detection_range
-        self._is_film_type_negative = is_film_type_negative
+        self.preview_width = preview_width
         self._slope_threshold = slope_threshold
         self._contrast_offset = contrast_offset
         self._contrast_pic_height = contrast_pic_height
@@ -38,8 +31,10 @@ class VisionSensorSettings:
         self._tile_center_offset = tile_center_offset
         self._tile_width = tile_width
         self._tile_height = tile_height
-        self.exposure_time = exposure_time
-        self.lens_position = lens_position
+        self.stop_position = stop_position
+        self._stop_offset = stop_offset
+        self._is_film_type_negative = is_film_type_negative
+        self.edge_detection_range = edge_detection_range
 
     @property
     def tile_center_offset(self):
@@ -48,8 +43,8 @@ class VisionSensorSettings:
     @tile_center_offset.setter
     def tile_center_offset(self, value:int):
         self._tile_center_offset = value
-        if (self._tile_center_offset + self._tile_width) > (self.PREVIEW_WIDTH // 2):
-            self._tile_width = (self.PREVIEW_WIDTH // 2) - self._tile_center_offset
+        if (self._tile_center_offset + self._tile_width) > (self.preview_width // 2):
+            self._tile_width = (self.preview_width // 2) - self._tile_center_offset
         self.logger.info(f"set tile_center_offset to: {self._tile_center_offset}")
 
     @property
@@ -59,8 +54,8 @@ class VisionSensorSettings:
     @tile_width.setter
     def tile_width(self, value:int):
         self._tile_width = value
-        if (self._tile_width + self._tile_center_offset) > (self.PREVIEW_WIDTH // 2):
-            self._tile_width = (self.PREVIEW_WIDTH // 2) - self._tile_center_offset
+        if (self._tile_width + self._tile_center_offset) > (self.preview_width // 2):
+            self._tile_width = (self.preview_width // 2) - self._tile_center_offset
         self.logger.info(f"set tile_width to: {self._tile_width}")
 
     @property
@@ -135,6 +130,15 @@ class VisionSensorSettings:
         self._stop_position = value
         self.logger.info(f"set stop_position to: {self._stop_position}")
 
+    @property
+    def stop_offset(self):
+        return self._stop_offset
+
+    @stop_offset.setter
+    def stop_offset(self, value):
+        self._stop_offset = value
+        self.logger.info(f"set stop_offset to: {self._stop_offset}")
+
 
 class CalcEdgeSlopeParameter:
     def __init__(self):
@@ -173,7 +177,7 @@ class ContrastMeasurements:
 
 
 class CalculateContrast:
-    def __init__(self, vs_settings: VisionSensorSettings):
+    def __init__(self, vs_settings: ProcessEdgeSettings):
         self.vs_settings = vs_settings
         self.measurements = ContrastMeasurements()
 
@@ -184,6 +188,9 @@ class CalculateContrast:
         """Calculate contrast measurements for inner and outer regions of image tiles"""
         inner_rois = self._get_inner_rois(image_tile_left, image_tile_right, edge_position)
         outer_rois = self._get_outer_rois(image_tile_left, image_tile_right, edge_position)
+
+        if any(roi.size == 0 for roi in (*inner_rois, *outer_rois)):
+            return
 
         self.measurements = ContrastMeasurements(
             inner_left=float(np.median(inner_rois[0])),
@@ -213,7 +220,10 @@ class CalculateContrast:
 
     @staticmethod
     def _extract_roi(image: NDArray, min_pos: int, max_pos: int) -> NDArray:
-        """Extract a region of interest from an image tile"""
+        """Extract a region of interest from an image tile, clamped to the image bounds"""
+        height = image.shape[0]
+        min_pos = max(0, min(min_pos, height))
+        max_pos = max(min_pos, min(max_pos, height))
         return image[min_pos:max_pos, 0:image.shape[1]]
 
     def _calculate_totals(self) -> None:
@@ -230,14 +240,14 @@ class EdgeParameterObject:
 
 
 class ProcessImageEdgeParameters:
-    def __init__(self, vs_settings:VisionSensorSettings):
+    def __init__(self, edge_processing_settings:ProcessEdgeSettings):
         self.image_np = None
         self.image_width:int = 0
         self.image_height:int = 0
         self.result_mean = EdgeParameterObject()
         self.result_tile_left = EdgeParameterObject()
         self.result_tile_right = EdgeParameterObject()
-        self.vs_settings = vs_settings
+        self.edge_processing_settings = edge_processing_settings
         self.left_tile_slope_data = CalcEdgeSlopeParameter()
         self.right_tile_slope_data = CalcEdgeSlopeParameter()
         self._edge_position_tile_diff:int = 0
@@ -249,7 +259,7 @@ class ProcessImageEdgeParameters:
         self._slope_diff_falling:float = 0.0
         self._new_edge_detected:bool = False
         self._t_edge_position:int = 0
-        self.contrast_offset_data = CalculateContrast(vs_settings=self.vs_settings)
+        self.contrast_offset_data = CalculateContrast(vs_settings=self.edge_processing_settings)
         self._edge_detected: bool = False
         self._edge_in_position: bool = False
 
@@ -261,13 +271,13 @@ class ProcessImageEdgeParameters:
 
             self.left_tile_slope_data.image_data, self.right_tile_slope_data.image_data = self._get_image_tiles(
                 image_data=self.image_np,
-                vs_settings=self.vs_settings
+                vs_settings=self.edge_processing_settings
             )
 
             self.left_tile_slope_data.calculate()
             self.right_tile_slope_data.calculate()
 
-            if self.vs_settings.is_film_type_negative:
+            if self.edge_processing_settings.is_film_type_negative:
                 self._edge_position_tile_diff = abs(self.left_tile_slope_data.pos_film_neg - self.right_tile_slope_data.pos_film_neg)
                 self.result_mean.edge_slope = abs(self.left_tile_slope_data.slope_film_neg + self.right_tile_slope_data.slope_film_neg)
                 self.result_tile_left.edge_slope = self.left_tile_slope_data.slope_film_neg
@@ -283,32 +293,32 @@ class ProcessImageEdgeParameters:
             self._slope_diff_rising = self.result_mean.edge_slope - min(self._arr_slope_total_mean)
             self._slope_diff_falling = self._slope_total_mean - max(self._arr_slope_total_mean)
 
-            if (self.result_mean.edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
-                self._new_edge_detected = 200
-                self._arr_slope_total_mean.clear()
-                self._arr_slope_total_mean.append(self.result_mean.edge_slope)
+            # if (self.result_mean.edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
+            #     self._new_edge_detected = 200
+            #     self._arr_slope_total_mean.clear()
+            #     self._arr_slope_total_mean.append(self.result_mean.edge_slope)
+            #
+            # if (self._slope_total_mean - self.result_mean.edge_slope) > 40 and self._new_edge_detected == 200:
+            #     self._new_edge_detected = 0
+            #     self._arr_slope_total_mean.clear()
+            #     self._arr_slope_total_mean.append(self.result_mean.edge_slope)
 
-            if (self._slope_total_mean - self.result_mean.edge_slope) > 40 and self._new_edge_detected == 200:
-                self._new_edge_detected = 0
-                self._arr_slope_total_mean.clear()
-                self._arr_slope_total_mean.append(self.result_mean.edge_slope)
 
-
-            if self.result_mean.edge_slope > self.vs_settings.slope_threshold:
-                if self.vs_settings.is_film_type_negative:
+            if self.result_mean.edge_slope > self.edge_processing_settings.slope_threshold:
+                if self.edge_processing_settings.is_film_type_negative:
                     self._t_edge_position = (self.left_tile_slope_data.pos_film_neg + self.right_tile_slope_data.pos_film_neg) // 2
                 else:
                     self._t_edge_position = (self.left_tile_slope_data.pos_film_pos + self.right_tile_slope_data.pos_film_pos) // 2
 
-            if self._t_edge_position > (self.vs_settings.contrast_pic_height + self.vs_settings.contrast_pic_offset):
+            if self._t_edge_position > (self.edge_processing_settings.contrast_pic_height + self.edge_processing_settings.contrast_pic_offset):
                 self.contrast_offset_data.calculate_contrast(
                     image_tile_left=self.left_tile_slope_data.image_data,
                     image_tile_right=self.right_tile_slope_data.image_data,
                     edge_position=self._t_edge_position
                 )
 
-            if self.vs_settings.is_film_type_negative:
-                if self.contrast_offset_data.measurements.inner_total + self.vs_settings.contrast_offset < self.contrast_offset_data.measurements.outer_total:
+            if self.edge_processing_settings.is_film_type_negative:
+                if self.contrast_offset_data.measurements.inner_total + self.edge_processing_settings.contrast_offset < self.contrast_offset_data.measurements.outer_total:
                     self.result_mean.edge_position = self._t_edge_position
                 else:
                     self.result_mean.edge_position = -1
@@ -318,7 +328,7 @@ class ProcessImageEdgeParameters:
                 self.result_tile_left.edge_state = self._get_edge_state(edge_position=self.left_tile_slope_data.pos_film_neg)
                 self.result_tile_right.edge_state = self._get_edge_state(edge_position=self.right_tile_slope_data.pos_film_neg)
             else:
-                if self.contrast_offset_data.measurements.inner_total + self.vs_settings.contrast_offset > self.contrast_offset_data.measurements.outer_total:
+                if self.contrast_offset_data.measurements.inner_total + self.edge_processing_settings.contrast_offset > self.contrast_offset_data.measurements.outer_total:
                     self.result_mean.edge_position = self._t_edge_position
                 else:
                     self.result_mean.edge_position = -1
@@ -332,13 +342,13 @@ class ProcessImageEdgeParameters:
 
     def _get_edge_state(self, edge_position:int):
         edge_state = 0
-        edge_min_pos = int(self.vs_settings.stop_position - (self.vs_settings.edge_detection_range // 2))
-        edge_max_pos = int(self.vs_settings.stop_position + (self.vs_settings.edge_detection_range // 2))
+        edge_min_pos = int(self.edge_processing_settings.stop_position - (self.edge_processing_settings.edge_detection_range // 2))
+        edge_max_pos = int(self.edge_processing_settings.stop_position + (self.edge_processing_settings.edge_detection_range // 2))
 
         if edge_position > 0:
             edge_state = 1
 
-        # print(self.vs_settings.stop_position, edge_min_pos, edge_max_pos, edge_position)
+        # print(self.edge_processing_settings.stop_position, edge_min_pos, edge_max_pos, edge_position)
         if edge_min_pos <= edge_position <= edge_max_pos:
             edge_state = 2
 
@@ -347,7 +357,7 @@ class ProcessImageEdgeParameters:
     @staticmethod
     def _get_image_tiles(
             image_data:NDArray,
-            vs_settings:VisionSensorSettings,
+            vs_settings:ProcessEdgeSettings,
     ) -> Tuple[NDArray, NDArray]:
         img_height, img_width = image_data.shape[:2]
         tile_height = max(0, min(vs_settings.stop_position + 20, img_height))
