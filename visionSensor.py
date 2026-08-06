@@ -137,8 +137,6 @@ class VisionSensor:
         self._camRgb.setFps(self.set_fps)
         self._camRgb.initialControl.setManualFocus(self.settings.lens_position)
         self._camRgb.initialControl.setManualExposure(self.settings.exposure_time, self._iso)
-        self._camRgb.initialControl.setManualFocus(self.settings.lens_position)
-        self._camRgb.initialControl.setManualExposure(self.settings.exposure_time, self._iso)
         self._camRgb.setImageOrientation(dai.CameraImageOrientation.ROTATE_180_DEG)
         if self._flip_image:
             self._camRgb.setImageOrientation(dai.CameraImageOrientation.VERTICAL_FLIP)
@@ -166,6 +164,8 @@ class VisionSensor:
         self._device = dai.Device(self._pipeline, self.device_info)
         self._image_edge_queue = self._device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
         self._camera_control_queue = self._device.getInputQueue('control')
+
+        self.exposure_time = self.settings.exposure_time
 
     def _process_image(self):
         while True:
@@ -301,6 +301,7 @@ class VisionSensor:
 
         return np.concatenate((stat_image_tile_left, stat_image_tile_right), axis=1)
 
+    @staticmethod
     def _calculate_histogram_bounds(self, image: np.ndarray, max_value: int,
                                     clip_percent: float) -> Tuple[float, float]:
         """Calculate histogram clipping bounds based on a given percentage."""
@@ -328,76 +329,11 @@ class VisionSensor:
 
         return clip_min, clip_max
 
+    @staticmethod
     def _calculate_image_statistics(self, image: np.ndarray) -> Tuple[float, float]:
         """Calculate mean and standard deviation of the image."""
         mean, std_dev = cv2.meanStdDev(image)
         return mean.flatten()[0], std_dev.flatten()[0]
-
-    # def calc_statistics(self):
-    #     if self.results.left_tile_slope_data.image_data is not None and self.results.right_tile_slope_data.image_data is not None:
-    #         self.logger.info("start calculating statistics")
-    #         mean_flatten = 0
-    #         std_dev_flatten = 0
-    #
-    #         tile_height, tile_width = self.results.left_tile_slope_data.image_data.shape
-    #         stat_image_tile_left = self.results.left_tile_slope_data.image_data[
-    #                                0 : self.results.result_mean.edge_position - 20,
-    #                                0 : tile_width
-    #                                ]
-    #         stat_image_tile_right = self.results.right_tile_slope_data.image_data[
-    #                                 0 : self.results.result_mean.edge_position - 20,
-    #                                 0 : tile_width
-    #                                 ]
-    #         stat_image_full = np.concatenate((stat_image_tile_left, stat_image_tile_right), axis=1)
-    #
-    #         vs_maximum_dn = 256  # for image_np depth of byte
-    #         clipping_percent = 0.05  # in percent for clipping the histogram with 0.025% from left and 0.025% from right
-    #
-    #         # computing histogram
-    #         hist = cv2.calcHist([stat_image_full], [0], None, [vs_maximum_dn], [0, vs_maximum_dn])
-    #         hist = hist.flatten()
-    #
-    #         # Clipping the histogram by CLIPPING_PERCENT/2 % from bottom and top
-    #         cutoff = stat_image_full.shape[0] * stat_image_full.shape[1] * clipping_percent / 2
-    #
-    #         image_min, image_max, _, _ = cv2.minMaxLoc(stat_image_full)
-    #         clip_min = image_min  # starting value for clipMin
-    #         clip_max = image_max  # starting value for clipMax
-    #
-    #         accumulate_right = 0
-    #         accumulate_left = 0
-    #         clip_left_found = False
-    #         clip_right_found = False
-    #         for i in range(hist.size):
-    #             if not clip_right_found:
-    #                 accumulate_right += hist[hist.size - 1 - i]
-    #                 if accumulate_right < cutoff:
-    #                     clip_max = hist.size - 2 - i
-    #                 else:
-    #                     clip_right_found = True
-    #
-    #             if not clip_left_found:
-    #                 accumulate_left += hist[i]
-    #                 if accumulate_left < cutoff:
-    #                     clip_min = i
-    #                 else:
-    #                     clip_left_found = True
-    #
-    #             if clip_left_found and clip_right_found:
-    #                 break
-    #         try:
-    #             # computing the mean and standard deviation. Note that the returned values are two-dimensional
-    #             mean, std_dev = cv2.meanStdDev(stat_image_full)
-    #             mean_flatten = mean.flatten()[0]
-    #             std_dev_flatten = std_dev.flatten()[0]
-    #         except Exception as e:
-    #             self.logger.error(e)
-    #             traceback.print_exc()
-    #
-    #         # flatten mean and std to obtain a vector and obtain the single value in it.
-    #         return image_min, image_max, clip_min, clip_max, round(mean_flatten, 3), round(std_dev_flatten, 3)
-    #     else:
-    #         return None
 
     @property
     def new_image_available(self):
@@ -457,6 +393,7 @@ class VisionSensor:
         self._camCtrl = dai.CameraControl()
         self._camCtrl.setManualExposure(self.settings.exposure_time, self._iso)
         self._camera_control_queue.send(self._camCtrl)
+        self._camCtrl.setAutoExposureLock(True)
 
     def auto_exposure_camera(self, cb_auto_exposure_finished=None):
         self.logger.info("Sensor Auto-Exposure...")
@@ -485,13 +422,3 @@ class VisionSensor:
             self.fps = self._fps_counter
             self._fps_counter = 0
             time.sleep(1.0)
-
-    # def _log_info_vsensor(self, message):
-    #     message = str(message)
-    #     log_message = f"[{self.name}]" + " - " + message
-    #     self.logger.info(log_message)
-
-    # def _log_debug_vsensor(self, message):
-    #     message = str(message)
-    #     log_message = f"[{self.name}]" + " - " + message
-    #     self.logger.debug(log_message)
