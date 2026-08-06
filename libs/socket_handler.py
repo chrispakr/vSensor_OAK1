@@ -128,6 +128,7 @@ class SocketHandler:
     def send_image(self, vs_front_slope_data: Any, vs_rear_slope_data: Any) -> None:
         """Thread-safe method to send image data."""
         with self._lock:
+            self.logger.debug("Sending image data")
             self._process_data = SocketData(vs_front_slope_data, vs_rear_slope_data)
 
     def _handle_connection_error(self, error: Exception) -> None:
