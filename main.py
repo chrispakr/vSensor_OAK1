@@ -19,6 +19,7 @@ from visionSensor import VisionSensor
 from libs.socket_handler import SocketHandler
 import log_handler.log_handler as log_handler
 from libs.config_file_handler import ConfigFileHandler
+from libs.vs_process_image import VisionSensorSettings
 
 CONFIG_DIR = ".vSensorM4"
 HOME_DIR = os.path.expanduser('~')
@@ -51,9 +52,6 @@ vs_rear_live_view_frame_nr = 0
 vs_front_send_mqtt_image = False
 vs_rear_send_mqtt_image = False
 
-vs_front_last_edge_position = 0
-vs_rear_last_edge_position = 0
-
 config_handler = ConfigFileHandler(INIT_CONFIG_FILE)
 
 main_logger.info(f"DephtAi-Version : {dai.__version__}")
@@ -83,22 +81,6 @@ if not plc_handler.connected:
     main_logger.error(f"Could not connect to PLC within {CONNECT_TIMEOUT_S}s - exit program")
     sys.exit(1)
 
-main_logger.info("set init values to plc")
-
-# plc_handler.vs_ctrl.vsRightLensPosition.value = config_handler.vs_front.lens_position
-# plc_handler.vs_ctrl.vsRightSerialNumber.value = config_handler.vs_front.serial
-# plc_handler.vs_ctrl.vsRightImageCenterOffset.value = config_handler.vs_front.center_offset
-#
-# plc_handler.vs_ctrl.vsLeftLensPosition.value = config_handler.vs_rear.lens_position
-# plc_handler.vs_ctrl.vsLeftSerialNumber.value = config_handler.vs_rear.serial
-# plc_handler.vs_ctrl.vsLeftImageCenterOffset.value = config_handler.vs_rear.center_offset
-#
-# plc_handler.vs_ctrl.settings.stdExposureTimePositive.value = config_handler.general.exposure_time_positive
-# plc_handler.vs_ctrl.settings.stdExposureTimeNegative.value = config_handler.general.exposure_time_negative
-# plc_handler.vs_ctrl.rawImageCropTop.value = config_handler.vs_front.raw_image_crop_top
-# plc_handler.vs_ctrl.rawImageHeight.value = config_handler.vs_front.raw_image_height
-# plc_handler.vs_ctrl.rawImageWidth.value = config_handler.vs_front.raw_image_width
-
 found_front_sensor = False
 found_rear_sensor = False
 
@@ -119,11 +101,11 @@ if config_handler.vs_front.serial and config_handler.vs_rear.serial:
     found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceByMxId(config_handler.vs_rear.serial)
 else:
     if len(devices_found) == 2:
-        config_handler.vs_front.serial = devices_found[0].getDeviceId()
-        config_handler.vs_rear.serial = devices_found[1].getDeviceId()
+        config_handler.vs_front.serial = devices_found[0].getMxId()
+        config_handler.vs_rear.serial = devices_found[1].getMxId()
         config_handler.save_config()
-        found_front_sensor, device_info_front_sensor = dai.Device.getDeviceById(config_handler.vs_front.serial)
-        found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceById(config_handler.vs_rear.serial)
+        found_front_sensor, device_info_front_sensor = dai.Device.getDeviceByMxId(config_handler.vs_front.serial)
+        found_rear_sensor, device_info_rear_sensor = dai.Device.getDeviceByMxId(config_handler.vs_rear.serial)
 
 if not found_front_sensor:
     raise RuntimeError("FrontSensor not found!")
@@ -131,14 +113,48 @@ if not found_front_sensor:
 if not found_rear_sensor:
     raise RuntimeError("RearSensor not found!")
 
+# plc_handler.vs_ctrl.vsRightSerialNumber.value = device_info_front_sensor
+
+vs_front_settings = VisionSensorSettings(
+    camera_center_position=plc_handler.vs_ctrl.vsRightImageCenterOffset.value,
+    stop_position=plc_handler.vs_ctrl.vsRightStopPosition.value,
+    edge_detection_range=plc_handler.vs_ctrl.edgeDetectionRange.value,
+    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
+    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
+    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
+    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
+    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
+    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
+    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
+    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
+    exposure_time=plc_handler.vs_ctrl.exposureTime.value,
+    lens_position=plc_handler.vs_ctrl.vsRightLensPosition.value,
+)
+vs_rear_settings = VisionSensorSettings(
+    camera_center_position=plc_handler.vs_ctrl.vsLeftImageCenterOffset.value,
+    stop_position=plc_handler.vs_ctrl.vsLeftStopPosition.value,
+    edge_detection_range=plc_handler.vs_ctrl.edgeDetectionRange.value,
+    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
+    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
+    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
+    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
+    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
+    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
+    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
+    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
+    exposure_time=plc_handler.vs_ctrl.exposureTime.value,
+    lens_position=plc_handler.vs_ctrl.vsLeftLensPosition.value,
+)
+
 
 cam_vs_front = VisionSensor(
     device_info_front_sensor,
     vs_name="vs_front",
+    vs_settings=vs_front_settings,
     camera_capture_width=config_handler.vs_front.capture_width,
     camera_capture_height=config_handler.vs_front.capture_height,
-    image_center_position=config_handler.vs_front.center_offset,
-    lens_position=config_handler.vs_front.lens_position,
+    # image_center_position=config_handler.vs_front.center_offset,
+    # lens_position=config_handler.vs_front.lens_position,
     raw_image_height=plc_handler.vs_ctrl.rawImageHeight.value,
     raw_image_width=plc_handler.vs_ctrl.rawImageWidth.value,
     flip_image=False,
@@ -148,29 +164,14 @@ cam_vs_front = VisionSensor(
 cam_vs_rear = VisionSensor(
     device_info=device_info_rear_sensor,
     vs_name="vs_rear",
+    vs_settings=vs_rear_settings,
     camera_capture_width=config_handler.vs_rear.capture_width,
     camera_capture_height=config_handler.vs_rear.capture_height,
-    image_center_position=config_handler.vs_rear.center_offset,
-    lens_position=config_handler.vs_rear.lens_position,
     raw_image_height=plc_handler.vs_ctrl.rawImageHeight.value,
     raw_image_width=plc_handler.vs_ctrl.rawImageWidth.value,
     flip_image=True,
     fps=config_handler.general.fps,
-
 )
-
-def cb_film_type_is_negative(value):
-    def _apply():
-        main_logger.info(f"set film_type_is_negative to: {value}")
-        cam_vs_front.settings.is_film_type_negative = value
-        cam_vs_rear.settings.is_film_type_negative = value
-        if value:
-            cam_vs_front.exposure_time = config_handler.general.exposure_time_negative
-            cam_vs_rear.exposure_time = config_handler.general.exposure_time_negative
-        else:
-            cam_vs_front.exposure_time = config_handler.general.exposure_time_positive
-            cam_vs_rear.exposure_time = config_handler.general.exposure_time_positive
-    threading.Thread(target=_apply, daemon=True).start()
 
 def cb_auto_exposure_cameras_finished():
     if not cam_vs_front.auto_exposure_in_progress and not cam_vs_rear.auto_exposure_in_progress:
@@ -189,227 +190,158 @@ def cb_auto_focus_finished():
         main_logger.info(f"Lens-Position cam_rear : {cam_vs_rear.lens_position}")
         plc_handler.vs_ctrl.vsRightLensPosition.value = cam_vs_front.lens_position
         plc_handler.vs_ctrl.vsLeftLensPosition.value = cam_vs_rear.lens_position
-        config_handler.vs_front.lens_position = cam_vs_front.lens_position
-        config_handler.vs_rear.lens_position = cam_vs_rear.lens_position
-        config_handler.save_config()
         plc_handler.vs_ctrl.isConnected.value = True
-
-def cb_auto_exposure_cameras(value):
-    def _apply():
-        main_logger.info(f"Start AutoExposure...")
-        plc_handler.vs_ctrl.isConnected.value = False
-        cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
-        cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
-        plc_handler.vs_ctrl._autoExposureCameras.value = False
-    if value:
-        threading.Thread(target=_apply, daemon=True).start()
-
-def cb_auto_focus_cameras(value):
-    def _apply():
-        main_logger.info("Start AutoFocus Cameras...")
-        plc_handler.vs_ctrl.isConnected.value = False
-        cam_vs_front.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
-        cam_vs_rear.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
-        plc_handler.vs_ctrl._autoFocusCameras.value = False
-    if value:
-        threading.Thread(target=_apply, daemon=True).start()
-
-def cb_swap_cameras(value):
-    def _apply():
-        config_handler.swap_cameras()
-        plc_handler.vs_ctrl.swapCameras.value = False
-    if value:
-        threading.Thread(target=_apply, daemon=True).start()
-
-def cb_slope_threshold(value):
-    cam_vs_front.settings.slope_threshold = value
-    cam_vs_rear.settings.slope_threshold = value
-
-def cb_image_tile_center_offset(value):
-    cam_vs_front.settings.tile_center_offset = value
-    cam_vs_rear.settings.tile_center_offset = value
-
-def cb_contrast_offset(value):
-    cam_vs_front.settings.contrast_offset = value
-    cam_vs_rear.settings.contrast_offset = value
-
-def cb_image_tile_width(value):
-    cam_vs_front.settings.tile_width = int(value)
-    cam_vs_rear.settings.tile_width = int(value)
-
-def cb_image_tile_height(value):
-    cam_vs_front.settings.tile_height = int(value)
-    cam_vs_rear.settings.tile_height = int(value)
-
-# def cb_vs_front_image_center_position(value):
-#     cam_vs_front.settings.camera_center_position = int(value)
-#     config_handler.vs_front.center_offset = value
-#     config_handler.save_config()
-
-# def cb_vs_rear_image_center_position(value):
-#     cam_vs_rear.settings.camera_center_position = int(value)
-#     config_handler.vs_rear.center_offset = value
-#     config_handler.save_config()
-
-def cb_edge_detection_range(value):
-    cam_vs_front.settings.edge_detection_range = int(value)
-    cam_vs_rear.settings.edge_detection_range = int(value)
-
-def cb_contrast_pic_height(value):
-    cam_vs_front.settings.contrast_pic_height = int(value)
-    cam_vs_rear.settings.contrast_pic_height = int(value)
-
-def cb_contrast_pic_edge_offset(value):
-    cam_vs_front.contrast_pic_edge_offset = int(value)
-    cam_vs_rear.contrast_pic_edge_offset = int(value)
 
 def cb_live_view(value):
     main_logger.info(f"set enable_live_view to: {type(value)}")
 
-# def cb_raw_image_crop_top(value):
-#     cam_vs_rear.raw_image_crop_top = value
-#     config_handler.vs_rear.raw_image_crop_top = value
-#     config_handler.save_config()
-
-def cb_vs_front_raw_image_crop_top(value):
-    cam_vs_front.raw_image_crop_top = value
-    config_handler.vs_front.raw_image_crop_top = value
-    config_handler.save_config()
-
-# def cb_raw_image_height(value):
-#     cam_vs_front.raw_image_height = value
-#     cam_vs_rear.raw_image_height = value
-#     config_handler.vs_front.raw_image_height = value
-#     config_handler.vs_rear.raw_image_height = value
+# def cb_vs_front_raw_image_crop_top(value):
+#     cam_vs_front.raw_image_crop_top = value
+#     config_handler.vs_front.raw_image_crop_top = value
 #     config_handler.save_config()
 #
-# def cb_raw_image_width(value):
-#     cam_vs_front.raw_image_width = value
-#     cam_vs_rear.raw_image_width = value
+# def cb_vs_rear_raw_image_height_offset(value):
+#     cam_vs_rear._raw_image_height_offset = value
+#     config_handler.vs_rear.raw_image_height_offset = value
+#     config_handler.save_config()
+#
+# def cb_vs_rear_raw_image_width_offset(value):
+#     cam_vs_rear._raw_image_width_offset = value
+#     config_handler.vs_rear.raw_image_width_offset = value
+#     config_handler.save_config()
+#
+# def cb_vs_front_raw_image_width(value):
+#     cam_vs_front._raw_image_width = value
+#     cam_vs_rear._raw_image_width = value
 #     config_handler.vs_front.raw_image_width = value
 #     config_handler.vs_rear.raw_image_width = value
 #     config_handler.save_config()
+#
+# def cb_vs_front_raw_image_height_offset(value):
+#     cam_vs_front._raw_image_height_offset = value
+#     config_handler.vs_front.raw_image_height_offset = value
+#     config_handler.save_config()
 
-def cb_vs_rear_raw_image_height_offset(value):
-    cam_vs_rear._raw_image_height_offset = value
-    config_handler.vs_rear.raw_image_height_offset = value
-    config_handler.save_config()
-
-def cb_vs_rear_raw_image_width_offset(value):
-    cam_vs_rear._raw_image_width_offset = value
-    config_handler.vs_rear.raw_image_width_offset = value
-    config_handler.save_config()
-
-def cb_vs_front_raw_image_width(value):
-    cam_vs_front._raw_image_width = value
-    cam_vs_rear._raw_image_width = value
-    config_handler.vs_front.raw_image_width = value
-    config_handler.vs_rear.raw_image_width = value
-    config_handler.save_config()
-
-def cb_vs_front_raw_image_height_offset(value):
-    cam_vs_front._raw_image_height_offset = value
-    config_handler.vs_front.raw_image_height_offset = value
-    config_handler.save_config()
-
-def cb_vs_front_stop_position(value):
-    cam_vs_front.settings.stop_position = value
-
-def cb_vs_rear_stop_position(value):
-    cam_vs_rear.settings.stop_position = value
-
-def cb_vs_front_stop_offset(value):
-    cam_vs_front.settings.stop_offset = value
-
-def cb_vs_rear_stop_offset(value):
-    cam_vs_rear.settings.stop_offset = value
-
-def cb_std_exposure_time_pos(value):
-    config_handler.general.exposure_time_positive = value
-    config_handler.save_config()
-
-def cb_std_exposure_time_neg(value):
-    config_handler.general.exposure_time_negative = value
-    config_handler.save_config()
-
-def cb_exposure_time(value):
-    if value < 500:
-        value = 1200
-    cam_vs_front.exposure_time = value
-    cam_vs_rear.exposure_time = value
-
-# region ADS-VARIABLES (polled)
-# NOTE: values are updated via polling (see poll_ads_symbols()) instead of ADS notifications,
-# so that slow/blocking callbacks can never stall the pyads notification thread.
-# Symbols are resolved from plc_handler.vs_ctrl fresh on every poll (not captured once here),
-# because AdsHandler replaces vs_ctrl with a brand-new object on every (re)connect - holding
-# on to the old AdsSymbol references would silently stop them from ever updating again.
-polled_symbols = [
-    (lambda vs: vs.isFilmTypeNegative, cb_film_type_is_negative),
-    (lambda vs: vs._autoExposureCameras, cb_auto_exposure_cameras),
-    (lambda vs: vs._autoFocusCameras, cb_auto_focus_cameras),
-    (lambda vs: vs.slopeThreshold, cb_slope_threshold),
-    (lambda vs: vs.swapCameras, cb_swap_cameras),
-    (lambda vs: vs.contrastOffset, cb_contrast_offset),
-    (lambda vs: vs.edgeDetectionRange, cb_edge_detection_range),
-    (lambda vs: vs.exposureTime, cb_exposure_time),
-
-    (lambda vs: vs.settings.imageTileWidth, cb_image_tile_width),
-    (lambda vs: vs.settings.imageTileHeight, cb_image_tile_height),
-    (lambda vs: vs.settings.imageTileCenterOffset, cb_image_tile_center_offset),
-    (lambda vs: vs.settings.contrastPicHeight, cb_contrast_pic_height),
-    (lambda vs: vs.settings.contrastPicEdgeOffset, cb_contrast_pic_edge_offset),
-    (lambda vs: vs.settings.stdExposureTimePositive, cb_std_exposure_time_pos),
-    (lambda vs: vs.settings.stdExposureTimeNegative, cb_std_exposure_time_neg),
-
-    # (lambda vs: vs.rawImageCropTop, cb_raw_image_crop_top),
-    # (lambda vs: vs.rawImageHeight, cb_raw_image_height),
-    # (lambda vs: vs.rawImageWidth, cb_raw_image_width),
-
-    # (lambda vs: vs.vsRightImageCenterOffset, cb_vs_front_image_center_position),
-    # (lambda vs: vs.vsLeftImageCenterOffset, cb_vs_rear_image_center_position),
-    (lambda vs: vs.vsLeftStopPosition, cb_vs_rear_stop_position),
-    (lambda vs: vs.vsRightStopPosition, cb_vs_front_stop_position),
-    (lambda vs: vs.vsLeftStopOffset, cb_vs_rear_stop_offset),
-    (lambda vs: vs.vsRightStopOffset, cb_vs_front_stop_offset),
-]
 
 def poll_ads_symbols():
     vs_ctrl = plc_handler.vs_ctrl
     if vs_ctrl is None:
         return
 
-    for get_symbol, callback in polled_symbols:
-        symbol = get_symbol(vs_ctrl)
-        if symbol.new_value_available():
-            callback(symbol.last_value)
-
     if vs_ctrl.rawImageHeight.new_value_available():
         main_logger.info(f"rawImageHeight: {vs_ctrl.rawImageHeight.value}")
         cam_vs_front.raw_image_height = vs_ctrl.rawImageHeight.value
         cam_vs_rear.raw_image_height = vs_ctrl.rawImageHeight.value
-        # config_handler.vs_front.raw_image_height = vs_ctrl.rawImageHeight.value
-        # config_handler.vs_rear.raw_image_height = vs_ctrl.rawImageHeight.value
-        # config_handler.save_config()
 
     if vs_ctrl.rawImageWidth.new_value_available():
         main_logger.info(f"rawImageWidth: {vs_ctrl.rawImageWidth.value}")
         cam_vs_front.raw_image_width = vs_ctrl.rawImageWidth.value
         cam_vs_rear.raw_image_width = vs_ctrl.rawImageWidth.value
-        # config_handler.vs_front.raw_image_width = vs_ctrl.rawImageWidth.value
-        # config_handler.vs_rear.raw_image_width = vs_ctrl.rawImageWidth.value
-        # config_handler.save_config()
 
     if vs_ctrl.rawImageCropTop.new_value_available():
         cam_vs_rear.raw_image_crop_top = vs_ctrl.rawImageCropTop.value
-        # config_handler.vs_rear.raw_image_crop_top = vs_ctrl.rawImageCropTop.value
-        # config_handler.save_config()
 
     if vs_ctrl.vsRightImageCenterOffset.new_value_available():
         cam_vs_front.settings.camera_center_position = int(vs_ctrl.vsRightImageCenterOffset.value)
 
     if vs_ctrl.vsLeftImageCenterOffset.new_value_available():
         cam_vs_rear.settings.camera_center_position = int(vs_ctrl.vsLeftImageCenterOffset.value)
+
+    if vs_ctrl.vsRightStopPosition.new_value_available():
+        cam_vs_front.settings.stop_position = int(vs_ctrl.vsRightStopPosition.value)
+
+    if vs_ctrl.vsLeftStopPosition.new_value_available():
+        cam_vs_rear.settings.stop_position = int(vs_ctrl.vsLeftStopPosition.value)
+
+    if vs_ctrl.slopeThreshold.new_value_available():
+        cam_vs_front.settings.slope_threshold = int(vs_ctrl.slopeThreshold.value)
+        cam_vs_rear.settings.slope_threshold = int(vs_ctrl.slopeThreshold.value)
+
+    if vs_ctrl.settings.imageTileCenterOffset.new_value_available():
+        cam_vs_front.settings.tile_center_offset = int(vs_ctrl.settings.imageTileCenterOffset.value)
+        cam_vs_rear.settings.tile_center_offset = int(vs_ctrl.settings.imageTileCenterOffset.value)
+
+    if vs_ctrl.settings.imageTileHeight.new_value_available():
+        cam_vs_front.settings.tile_height = int(vs_ctrl.settings.imageTileHeight.value)
+        cam_vs_rear.settings.tile_height = int(vs_ctrl.settings.imageTileHeight.value)
+
+    if vs_ctrl.settings.imageTileWidth.new_value_available():
+        cam_vs_front.settings.tile_width = int(vs_ctrl.settings.imageTileWidth.value)
+        cam_vs_rear.settings.tile_width = int(vs_ctrl.settings.imageTileWidth.value)
+
+    if vs_ctrl.contrastOffset.new_value_available():
+        cam_vs_front.settings.contrast_offset = int(vs_ctrl.contrastOffset.value)
+        cam_vs_rear.settings.contrast_offset = int(vs_ctrl.contrastOffset.value)
+
+    if vs_ctrl.swapCameras.new_value_available():
+        if vs_ctrl.swapCameras.value:
+            config_handler.swap_cameras()
+            vs_ctrl.swapCameras.value = False
+
+    if vs_ctrl.exposureTime.new_value_available():
+        cam_vs_front.exposure_time = vs_ctrl.exposureTime.value
+        cam_vs_rear.exposure_time = vs_ctrl.exposureTime.value
+
+    if vs_ctrl.edgeDetectionRange.new_value_available():
+        cam_vs_front.settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
+        cam_vs_rear.settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
+
+    if vs_ctrl._autoExposureCameras.new_value_available():
+        def _apply():
+            main_logger.info("Start AutoFocus Cameras...")
+            vs_ctrl.isConnected.value = False
+            cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
+            cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
+            vs_ctrl._autoExposureCameras.value = False
+
+        if vs_ctrl._autoExposureCameras.value:
+            threading.Thread(target=_apply, daemon=True).start()
+
+    if vs_ctrl._autoFocusCameras.new_value_available():
+        def _apply():
+            main_logger.info("Start AutoFocus Cameras...")
+            vs_ctrl.isConnected.value = False
+            cam_vs_front.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
+            cam_vs_rear.auto_focus_camera(cb_autofocus_finished=cb_auto_focus_finished)
+            vs_ctrl._autoFocusCameras.value = False
+
+        if vs_ctrl._autoFocusCameras.value:
+            threading.Thread(target=_apply, daemon=True).start()
+
+    if vs_ctrl.isFilmTypeNegative.new_value_available():
+        def _apply():
+            main_logger.info("Start AutoExposure Cameras...")
+            vs_ctrl.isConnected.value = False
+            cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
+            cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
+            vs_ctrl._autoExposureCameras.value = False
+
+        if vs_ctrl._autoExposureCameras.value:
+            threading.Thread(target=_apply, daemon=True).start()
+
+    if vs_ctrl.settings.contrastPicHeight.new_value_available():
+        cam_vs_front.settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
+        cam_vs_rear.settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value
+
+    if vs_ctrl.settings.contrastPicEdgeOffset.new_value_available():
+        cam_vs_front.settings.contrast_pic_edge_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
+        cam_vs_rear.settings.contrast_pic_edge_offset = vs_ctrl.settings.contrastPicEdgeOffset.value
+
+    if vs_ctrl.settings.stdExposureTimeNegative.new_value_available():
+        cam_vs_front.settings.std_exposure_time_negative = vs_ctrl.settings.stdExposureTimeNegative.value
+        cam_vs_rear.settings.std_exposure_time_negative = vs_ctrl.settings.stdExposureTimeNegative.value
+
+    if vs_ctrl.settings.stdExposureTimePositive.new_value_available():
+        cam_vs_front.settings.std_exposure_time_positive = vs_ctrl.settings.stdExposureTimePositive.value
+        cam_vs_rear.settings.std_exposure_time_positive = vs_ctrl.settings.stdExposureTimePositive.value
+
+    if vs_ctrl.vsRightStopOffset.new_value_available():
+        cam_vs_front.settings.stop_position = vs_ctrl.vsRightStopOffset.value
+        cam_vs_rear.settings.stop_position = vs_ctrl.vsRightStopOffset.value
+
+    if vs_ctrl.vsLeftStopOffset.new_value_available():
+        cam_vs_front.settings.stop_position = vs_ctrl.vsLeftStopOffset.value
+        cam_vs_rear.settings.stop_position = vs_ctrl.vsLeftStopOffset.value
 
 # endregion
 
