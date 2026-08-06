@@ -25,8 +25,7 @@ class VisionSensorSettings:
                  exposure_time = 0,
                  lens_position = 0
                  ):
-        # self.preview_width = 800
-        self.logger = logging.getLogger("base." + self.__class__.__name__)
+        self.logger = logging.getLogger("main." + self.__class__.__name__)
         self._camera_center_position = camera_center_position
         self.stop_position = stop_position
         self.stop_offset = stop_offset
@@ -51,7 +50,7 @@ class VisionSensorSettings:
         self._tile_center_offset = value
         if (self._tile_center_offset + self._tile_width) > (self.PREVIEW_WIDTH // 2):
             self._tile_width = (self.PREVIEW_WIDTH // 2) - self._tile_center_offset
-        self.logger.debug(f"set tile_center_offset to: {self._tile_center_offset}")
+        self.logger.info(f"set tile_center_offset to: {self._tile_center_offset}")
 
     @property
     def tile_width(self):
@@ -62,16 +61,16 @@ class VisionSensorSettings:
         self._tile_width = value
         if (self._tile_width + self._tile_center_offset) > (self.PREVIEW_WIDTH // 2):
             self._tile_width = (self.PREVIEW_WIDTH // 2) - self._tile_center_offset
-        self.logger.debug(f"set tile_width to: {self._tile_width}")
+        self.logger.info(f"set tile_width to: {self._tile_width}")
 
-    @property
-    def tile_height(self):
-        return self._tile_height
-
-    @tile_height.setter
-    def tile_height(self, value: int):
-        self._tile_height = value
-        self.logger.debug(f"set tile_height to: {self.tile_height}")
+    # @property
+    # def tile_height(self):
+    #     return self._tile_height
+    #
+    # @tile_height.setter
+    # def tile_height(self, value: int):
+    #     self._tile_height = value
+    #     self.logger.debug(f"set tile_height to: {self.tile_height}")
 
     @property
     def slope_threshold(self):
@@ -80,7 +79,7 @@ class VisionSensorSettings:
     @slope_threshold.setter
     def slope_threshold(self, value):
         self._slope_threshold = value
-        self.logger.debug(f"set slope_threshold to: {self._slope_threshold}")
+        self.logger.info(f"set slope_threshold to: {self._slope_threshold}")
 
     @property
     def contrast_offset(self):
@@ -89,7 +88,7 @@ class VisionSensorSettings:
     @contrast_offset.setter
     def contrast_offset(self, value):
         self._contrast_offset = value
-        self.logger.debug(f"set contrast_offset to: {self._contrast_offset}")
+        self.logger.info(f"set contrast_offset to: {self._contrast_offset}")
 
     @property
     def contrast_pic_height(self):
@@ -98,7 +97,7 @@ class VisionSensorSettings:
     @contrast_pic_height.setter
     def contrast_pic_height(self, value):
         self._contrast_pic_height = value
-        self.logger.debug(f"set contrast_pic_height to: {self._contrast_pic_height}")
+        self.logger.info(f"set contrast_pic_height to: {self._contrast_pic_height}")
 
     @property
     def contrast_pic_offset(self):
@@ -107,7 +106,7 @@ class VisionSensorSettings:
     @contrast_pic_offset.setter
     def contrast_pic_offset(self, value):
         self._contrast_pic_offset = value
-        self.logger.debug(f"set contrast_pic_offset to: {self._contrast_pic_offset}")
+        self.logger.info(f"set contrast_pic_offset to: {self._contrast_pic_offset}")
 
     @property
     def camera_center_position(self):
@@ -116,7 +115,7 @@ class VisionSensorSettings:
     @camera_center_position.setter
     def camera_center_position(self, value):
         self._camera_center_position = value
-        self.logger.debug(f"set camera_center_position to: {self._camera_center_position}")
+        self.logger.info(f"set camera_center_position to: {self._camera_center_position}")
 
     @property
     def edge_detection_range(self):
@@ -125,7 +124,7 @@ class VisionSensorSettings:
     @edge_detection_range.setter
     def edge_detection_range(self, value):
         self._edge_detection_range = value
-        self.logger.debug(f"set edge_detection_range to: {self._edge_detection_range}")
+        self.logger.info(f"set edge_detection_range to: {self._edge_detection_range}")
 
     @property
     def is_film_type_negative(self):
@@ -134,7 +133,16 @@ class VisionSensorSettings:
     @is_film_type_negative.setter
     def is_film_type_negative(self, value):
         self._is_film_type_negative = value
-        self.logger.debug(f"set is_film_type_negative to: {self._is_film_type_negative}")
+        self.logger.info(f"set is_film_type_negative to: {self._is_film_type_negative}")
+
+    @property
+    def stop_position(self):
+        return self._stop_position
+
+    @stop_position.setter
+    def stop_position(self, value):
+        self._stop_position = value
+        self.logger.info(f"set stop_position to: {self._stop_position}")
 
 
 class CalcEdgeSlopeParameter:
@@ -221,36 +229,6 @@ class CalculateContrast:
         """Calculate total contrast values for inner and outer measurements"""
         self.measurements.inner_total = self.measurements.inner_left + self.measurements.inner_right
         self.measurements.outer_total = self.measurements.outer_left + self.measurements.outer_right
-
-#
-# class CalculateContrast:
-#     def __init__(self, vs_settings:VisionSensorSettings):
-#         self.in_pic_contr_tile_left:float = 0.0
-#         self.in_pic_contr_tile_right:float = 0.0
-#         self.in_pic_contr_total:float = 0.0
-#         self.out_pic_contr_tile_left: float = 0.0
-#         self.out_pic_contr_tile_right: float = 0.0
-#         self.out_pic_contr_total: float = 0.0
-#         self.vs_settings = vs_settings
-#
-#     def calculate_contrast(self,
-#                            image_tile_left:NDArray,
-#                            image_tile_right:NDArray,
-#                            edge_position:int = 0):
-#         in_pic_max_pos = edge_position - self.vs_settings.contrast_pic_offset
-#         in_pic_min_pos = in_pic_max_pos - self.vs_settings.contrast_pic_height
-#         in_pic_image_roi_left = image_tile_left[in_pic_min_pos:in_pic_max_pos, 0:image_tile_left.shape[1]]
-#         in_pic_image_roi_right = image_tile_right[in_pic_min_pos:in_pic_max_pos, 0:image_tile_right.shape[1]]
-#         out_pic_min_pos = edge_position + self.vs_settings.contrast_pic_offset
-#         out_pic_max_pos = out_pic_min_pos + self.vs_settings.contrast_pic_height
-#         out_pic_image_roi_left = image_tile_left[out_pic_min_pos:out_pic_max_pos, 0:image_tile_left.shape[1]]
-#         out_pic_image_roi_right = image_tile_right[out_pic_min_pos:out_pic_max_pos, 0:image_tile_right.shape[1]]
-#         self.in_pic_contr_tile_left = np.median(in_pic_image_roi_left)
-#         self.in_pic_contr_tile_right = np.median(in_pic_image_roi_right)
-#         self.out_pic_contr_tile_left = np.median(out_pic_image_roi_left)
-#         self.out_pic_contr_tile_right = np.median(out_pic_image_roi_right)
-#         self.in_pic_contr_total = self.in_pic_contr_tile_left + self.in_pic_contr_tile_right
-#         self.out_pic_contr_total = self.out_pic_contr_tile_left + self.out_pic_contr_tile_right
 
 
 class EdgeParameterObject:
@@ -381,7 +359,7 @@ class ProcessImageEdgeParameters:
             vs_settings:VisionSensorSettings,
     ) -> Tuple[NDArray, NDArray]:
         img_height, img_width = image_data.shape[:2]
-        tile_height = max(0, min(vs_settings.tile_height, img_height))
+        tile_height = max(0, min(vs_settings.stop_position + 20, img_height))
         # Clamp against the actual image width (not the fixed PREVIEW_WIDTH the
         # settings are validated against), otherwise a narrower raw_image_width
         # can push the tile bounds out of range and yield an empty slice.
