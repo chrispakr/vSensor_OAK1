@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ClaudeCodeEditorTabs">
+    <option name="activeSessionId" value="be327271-40ed-4953-b589-79e714d556cb" />
+    <option name="openSessionIds">
+      <list>
+        <option value="cce9760a-ea46-42d1-be98-5c9b07324321" />
+        <option value="8a077802-1939-4d98-87d3-e27c290abf15" />
+        <option value="be327271-40ed-4953-b589-79e714d556cb" />
+      </list>
+    </option>
+    <option name="sessionPaths">
+      <map>
+        <entry key="8a077802-1939-4d98-87d3-e27c290abf15" value="/sessions/new" />
+        <entry key="be327271-40ed-4953-b589-79e714d556cb" value="/sessions/b0aa4058-5761-4c7d-878d-8148e4211d1b" />
+        <entry key="cce9760a-ea46-42d1-be98-5c9b07324321" value="/sessions/71b8cee4-4285-4cfa-83f2-762557bb3714" />
+      </map>
+    </option>
+    <option name="sessionTitles">
+      <map>
+        <entry key="8a077802-1939-4d98-87d3-e27c290abf15" value="Claude Code" />
+        <entry key="be327271-40ed-4953-b589-79e714d556cb" value="kannst du den log_handler optimieren?" />
+        <entry key="cce9760a-ea46-42d1-be98-5c9b07324321" value="2026-08-02 16:28:00,890 - [main.vs_rear ] - [ERROR" />
+      </map>
+    </option>
+  </component>
+</project>

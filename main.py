@@ -209,10 +209,10 @@ def poll_ads_symbols():
         cam_vs_rear.raw_image_crop_top = vs_ctrl.rawImageCropTop.value
 
     if vs_ctrl.vsRightImageCenterOffset.new_value_available():
-        vs_front_processing_settings.camera_center_position = int(vs_ctrl.vsRightImageCenterOffset.value)
+        cam_vs_front.camera_center_position = int(vs_ctrl.vsRightImageCenterOffset.value)
 
     if vs_ctrl.vsLeftImageCenterOffset.new_value_available():
-        cam_vs_rear.edge_processing_settings.camera_center_position = int(vs_ctrl.vsLeftImageCenterOffset.value)
+        cam_vs_rear.camera_center_position = int(vs_ctrl.vsLeftImageCenterOffset.value)
 
     if vs_ctrl.vsRightStopPosition.new_value_available():
         cam_vs_front.edge_processing_settings.stop_position = int(vs_ctrl.vsRightStopPosition.value)
@@ -309,6 +309,14 @@ tl = Timeloop()
 def mqtt_heartbeat():
     mqtt.pTopics_vsController.set_vsController_heartbeat.value = 3
 
+vs_heartbeat_state = False
+
+@tl.job(interval=timedelta(seconds=1))
+def ads_heartbeat():
+    global vs_heartbeat_state
+    vs_heartbeat_state = not vs_heartbeat_state
+    plc_handler.vs_ctrl.vsHeartBeat.value = vs_heartbeat_state
+
 tl.start()
 
 socket_handler = SocketHandler(host=LOCAL_HOST_IP, port=4001)
@@ -353,6 +361,7 @@ with (contextlib.ExitStack() as stack):
             plc_handler.vs_ctrl.vsRightEdgeState.value = cam_vs_front.results.result_mean.edge_state
             if plc_handler.vs_ctrl.enableLiveView.value:
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
+                    main_logger.info("send image over socket_handler")
                     socket_handler.send_image(
                         vs_front_slope_data=cam_vs_front.results,
                         vs_rear_slope_data=cam_vs_rear.results,

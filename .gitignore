@@ -1,2 +1,6 @@
 /depthai/
 /depthai-python/
+/aiOutput/
+/.claude/
+/.agents/
+__pycache__/

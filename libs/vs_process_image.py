@@ -95,15 +95,6 @@ class ProcessEdgeSettings:
         self.logger.info(f"set contrast_pic_offset to: {self._contrast_pic_offset}")
 
     @property
-    def camera_center_position(self):
-        return self._camera_center_position
-
-    @camera_center_position.setter
-    def camera_center_position(self, value):
-        self._camera_center_position = value
-        self.logger.info(f"set camera_center_position to: {self._camera_center_position}")
-
-    @property
     def edge_detection_range(self):
         return self._edge_detection_range
 

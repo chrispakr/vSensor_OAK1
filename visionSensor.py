@@ -16,6 +16,9 @@ import traceback
 
 class VisionSensor:
     fps_report_time = 3
+    DEVICE_CONNECT_RETRIES = 5
+    DEVICE_CONNECT_RETRY_DELAY_S = 2.0
+
     def __init__(self,
                  device_info: DeviceInfo,
                  vs_name: str,
@@ -115,8 +118,7 @@ class VisionSensor:
         self.camera_task.start()
 
 
-    def init_camera(self):
-        self._pipeline = None
+    def _build_pipeline(self):
         self._pipeline = dai.Pipeline()
 
         # Define sources and outputs
@@ -168,7 +170,21 @@ class VisionSensor:
         self._manip_edge_detection.out.link(self._x_out_edge_detection.input)
         self.controlIn.out.link(self._camRgb.inputControl)
 
-        self._device = dai.Device(self._pipeline, self.device_info)
+    def init_camera(self):
+        self._device = None
+        for attempt in range(1, self.DEVICE_CONNECT_RETRIES + 1):
+            self._build_pipeline()
+            try:
+                self._device = dai.Device(self._pipeline, self.device_info)
+                break
+            except RuntimeError as e:
+                self.logger.error(
+                    f"Failed to connect to device (attempt {attempt}/{self.DEVICE_CONNECT_RETRIES}): {e}"
+                )
+                if attempt == self.DEVICE_CONNECT_RETRIES:
+                    raise
+                time.sleep(self.DEVICE_CONNECT_RETRY_DELAY_S)
+
         self._image_edge_queue = self._device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
         self._camera_control_queue = self._device.getInputQueue('control')
 
@@ -392,6 +408,15 @@ class VisionSensor:
         cam_ctrl.setManualFocus(self._lens_position)
         with self._camera_control_lock:
             self._camera_control_queue.send(cam_ctrl)
+
+    @property
+    def camera_center_position(self):
+        return self._camera_center_position
+
+    @camera_center_position.setter
+    def camera_center_position(self, value: int):
+        self._camera_center_position = int(value)
+        self.logger.info(f"Set camera_center_position to: {self._camera_center_position}")
 
     @property
     def numpy_image_array(self):
