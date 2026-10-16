@@ -92,6 +92,18 @@ if not plc_handler.connected:
     main_logger.error(f"Could not connect to PLC within {CONNECT_TIMEOUT_S}s - exit program")
     sys.exit(1)
 
+def std_exposure_symbol(film_type_negative: bool):
+    settings = plc_handler.vs_ctrl.settings
+    return settings.stdExposureTimeNegative if film_type_negative else settings.stdExposureTimePositive
+
+# restore the std exposure times stored in init.json (e.g. from the last auto-exposure) to the PLC -
+# must happen before the first poll_ads_symbols(), which applies the std exposure of the current film type
+for _negative in (False, True):
+    _stored = config_handler.get_std_exposure_time(_negative)
+    if _stored:
+        main_logger.info(f"restore std exposure time ({'negative' if _negative else 'positive'}): {_stored}us")
+        std_exposure_symbol(_negative).value = _stored
+
 found_front_sensor = False
 found_rear_sensor = False
 
@@ -101,8 +113,8 @@ device_info_front_sensor = dai.DeviceInfo()
 device_info_rear_sensor = dai.DeviceInfo()
 
 if len(devices_found) != 2:
-    main_logger.info(f"found only one sensor... - exit program")
-    exit()
+    main_logger.error(f"found {len(devices_found)} sensor(s), expected 2 - exit program")
+    sys.exit(1)
 
 for device in devices_found:
     main_logger.info(f"found sensor ({device.getMxId()}) on state: {device.state}")
@@ -124,31 +136,22 @@ if not found_front_sensor:
 if not found_rear_sensor:
     raise RuntimeError("RearSensor not found!")
 
-vs_front_processing_settings = ProcessEdgeSettings(
-    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
-    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
-    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
-    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
-    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
-    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
-    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
-    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
-    stop_position=plc_handler.vs_ctrl.vsRightStopPosition.value,
-    # stop_offset=plc_handler.vs_ctrl.vsRightStopOffset.value,
-)
+def create_processing_settings(stop_position) -> ProcessEdgeSettings:
+    vs_ctrl = plc_handler.vs_ctrl
+    return ProcessEdgeSettings(
+        slope_threshold=vs_ctrl.slopeThreshold.value,
+        contrast_offset=vs_ctrl.contrastOffset.value,
+        tile_center_offset=vs_ctrl.settings.imageTileCenterOffset.value,
+        tile_width=vs_ctrl.settings.imageTileWidth.value,
+        tile_height=vs_ctrl.settings.imageTileHeight.value,
+        contrast_pic_height=vs_ctrl.settings.contrastPicHeight.value,
+        contrast_pic_edge_offset=vs_ctrl.settings.contrastPicEdgeOffset.value,
+        is_film_type_negative=vs_ctrl.isFilmTypeNegative.value,
+        stop_position=stop_position,
+    )
 
-vs_rear_processing_settings = ProcessEdgeSettings(
-    slope_threshold=plc_handler.vs_ctrl.slopeThreshold.value,
-    contrast_offset=plc_handler.vs_ctrl.contrastOffset.value,
-    tile_center_offset=plc_handler.vs_ctrl.settings.imageTileCenterOffset.value,
-    tile_width=plc_handler.vs_ctrl.settings.imageTileWidth.value,
-    tile_height=plc_handler.vs_ctrl.settings.imageTileHeight.value,
-    contrast_pic_height=plc_handler.vs_ctrl.settings.contrastPicHeight.value,
-    contrast_pic_edge_offset=plc_handler.vs_ctrl.settings.contrastPicEdgeOffset.value,
-    is_film_type_negative=plc_handler.vs_ctrl.isFilmTypeNegative.value,
-    stop_position=plc_handler.vs_ctrl.vsLeftStopPosition.value,
-    # stop_offset=plc_handler.vs_ctrl.vsLeftStopOffset.value,
-)
+vs_front_processing_settings = create_processing_settings(plc_handler.vs_ctrl.vsRightStopPosition.value)
+vs_rear_processing_settings = create_processing_settings(plc_handler.vs_ctrl.vsLeftStopPosition.value)
 
 # set by both camera threads whenever a new frame was processed - wakes up the main loop
 new_image_event = threading.Event()
@@ -193,6 +196,11 @@ def cb_auto_exposure_cameras_finished():
         main_logger.info(f"Exposure cam_rear : {cam_vs_rear.exposure_time}us")
         main_logger.info(f"Set mean-exposure-time to: {mean_exposure}us")
         plc_handler.vs_ctrl.exposureTime.value = mean_exposure
+        # remember the result as std exposure of the current film type (PLC + init.json), so it is used
+        # again after a film type change and after the next start
+        film_type_negative = bool(plc_handler.vs_ctrl.isFilmTypeNegative.value)
+        std_exposure_symbol(film_type_negative).value = mean_exposure
+        config_handler.set_std_exposure_time(film_type_negative, mean_exposure)
         plc_handler.vs_ctrl.isConnected.value = True
 
 def cb_auto_focus_finished():
@@ -259,11 +267,17 @@ def poll_ads_symbols():
             vs_ctrl.swapCameras.value = False
 
     if vs_ctrl.exposureTime.new_value_available():
-        def _apply():
-            cam_vs_front.exposure_time = vs_ctrl.exposureTime.value
-            cam_vs_rear.exposure_time = vs_ctrl.exposureTime.value
-        if vs_ctrl.exposureTime.value:
-            threading.Thread(target=_apply, daemon=True).start()
+        exposure_time = vs_ctrl.exposureTime.value
+        if exposure_time:
+            cam_vs_front.exposure_time = exposure_time
+            cam_vs_rear.exposure_time = exposure_time
+
+    # keep init.json in sync with std exposure changes done on the PLC/HMI side
+    # (on the first poll this just reads back the values restored at startup)
+    for _negative in (False, True):
+        _symbol = std_exposure_symbol(_negative)
+        if _symbol.new_value_available() and _symbol.value:
+            config_handler.set_std_exposure_time(_negative, int(_symbol.value))
 
     if vs_ctrl.edgeDetectionRange.new_value_available():
         vs_front_processing_settings.edge_detection_range = int(vs_ctrl.edgeDetectionRange.value)
@@ -271,7 +285,7 @@ def poll_ads_symbols():
 
     if vs_ctrl._autoExposureCameras.new_value_available():
         def _apply():
-            main_logger.info("Start AutoFocus Cameras...")
+            main_logger.info("Start AutoExposure Cameras...")
             vs_ctrl.isConnected.value = False
             cam_vs_front.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
             cam_vs_rear.auto_exposure_camera(cb_auto_exposure_finished=cb_auto_exposure_cameras_finished)
@@ -296,10 +310,7 @@ def poll_ads_symbols():
         main_logger.info(f"set film_type_is_negative to: {value}")
         vs_front_processing_settings.is_film_type_negative = value
         vs_rear_processing_settings.is_film_type_negative = value
-        if value:
-            plc_handler.vs_ctrl.exposureTime.value = plc_handler.vs_ctrl.settings.stdExposureTimeNegative.value
-        else:
-            plc_handler.vs_ctrl.exposureTime.value = plc_handler.vs_ctrl.settings.stdExposureTimePositive.value
+        plc_handler.vs_ctrl.exposureTime.value = std_exposure_symbol(bool(value)).value
 
     if vs_ctrl.settings.contrastPicHeight.new_value_available():
         vs_front_processing_settings.contrast_pic_height = vs_ctrl.settings.contrastPicHeight.value

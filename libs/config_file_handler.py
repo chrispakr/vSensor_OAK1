@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from dataclasses import dataclass, asdict, field, fields
 from typing import Optional
 import traceback
@@ -50,8 +51,10 @@ class VsConfigParameter:
 class GeneralConfigObject:
     """General configuration parameters."""
     fps: int = 60
-    exposure_time_positive: int = 5000
-    exposure_time_negative: int = 1200
+    # persistent copy of the PLC std exposure times (pVisionSensor.std_exposure_time_*), updated after an
+    # auto-exposure or a change on the PLC/HMI side; restored to the PLC on startup. None = not known yet.
+    std_exposure_time_positive: Optional[int] = None
+    std_exposure_time_negative: Optional[int] = None
 
 @dataclass
 class ConfigData:
@@ -67,6 +70,9 @@ class ConfigFileHandler:
         self.logger = logging.getLogger("main." + self.__class__.__name__)
         self.config_path = config_file
         self.config = ConfigData()
+        self._found_unknown_keys = False
+        # save_config is called from the main loop and from camera threads (auto-exposure callback)
+        self._save_lock = threading.Lock()
 
         if not os.path.exists(self.config_path):
             self.logger.info("No init-config found... - create new.")
@@ -93,6 +99,10 @@ class ConfigFileHandler:
             self.config.general = self._from_dict(GeneralConfigObject, general_data)
 
             self._log_all_settings()
+
+            if self._found_unknown_keys:
+                # rewrite the file once, so obsolete keys don't trigger a warning on every start
+                self.save_config()
         except Exception as e:
             self.logger.error(f"Error loading config: {e}")
             # Create new config with defaults if loading fails
@@ -110,6 +120,7 @@ class ConfigFileHandler:
         unknown = set(data) - known
         if unknown:
             self.logger.warning(f"Ignoring unknown config keys for {cls.__name__}: {sorted(unknown)}")
+            self._found_unknown_keys = True
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def _log_all_settings(self) -> None:
@@ -136,12 +147,35 @@ class ConfigFileHandler:
         }
 
         self.logger.info(f"Writing config file to {self.config_path}")
+        tmp_path = self.config_path + ".tmp"
         try:
-            with open(self.config_path, 'w') as f:
-                json.dump(config_dict, f, indent=4)
+            with self._save_lock:
+                # write to a temp file and replace atomically - a power loss during the write must not
+                # leave a truncated init.json (which would reset the config incl. camera serials)
+                with open(tmp_path, 'w') as f:
+                    json.dump(config_dict, f, indent=4)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.config_path)
         except Exception as e:
             self.logger.error(f"Error saving config: {e}")
             traceback.print_exc()
+
+    def get_std_exposure_time(self, film_type_negative: bool) -> Optional[int]:
+        if film_type_negative:
+            return self.config.general.std_exposure_time_negative
+        return self.config.general.std_exposure_time_positive
+
+    def set_std_exposure_time(self, film_type_negative: bool, value: int) -> None:
+        """Stores the std exposure time for the given film type (saves only if it changed)."""
+        if value is None or value == self.get_std_exposure_time(film_type_negative):
+            return
+        if film_type_negative:
+            self.config.general.std_exposure_time_negative = int(value)
+        else:
+            self.config.general.std_exposure_time_positive = int(value)
+        self.logger.info(f"std exposure time ({'negative' if film_type_negative else 'positive'}) stored: {value}us")
+        self.save_config()
 
     def swap_cameras(self) -> None:
         """Swaps configuration between front and rear cameras."""

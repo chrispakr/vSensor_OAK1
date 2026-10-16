@@ -1,4 +1,3 @@
-from collections import deque
 import copy
 import threading
 from typing import Tuple
@@ -249,11 +248,6 @@ class ProcessImageEdgeParameters:
         self._edge_position_tile_diff:int = 0
         self._total_edge_slope:float = 0.0
         self._total_contrast_offset: float = 0.0
-        self._arr_slope_total_mean = deque(maxlen=40)
-        self._slope_total_mean: float = 0.0
-        self._slope_diff_rising:float = 0.0
-        self._slope_diff_falling:float = 0.0
-        self._new_edge_detected:bool = False
         self._t_edge_position:int = 0
         self.contrast_offset_data = CalculateContrast(vs_settings=self.edge_processing_settings)
         self._edge_detected: bool = False
@@ -302,22 +296,6 @@ class ProcessImageEdgeParameters:
                 self.result_mean.edge_slope = abs(self.left_tile_slope_data.slope_film_pos + self.right_tile_slope_data.slope_film_pos)
                 self.result_tile_left.edge_slope = self.left_tile_slope_data.slope_film_pos
                 self.result_tile_right.edge_slope = self.right_tile_slope_data.slope_film_pos
-
-            self._arr_slope_total_mean.append(self.result_mean.edge_slope)
-            self._slope_total_mean = sum(self._arr_slope_total_mean) // len(self._arr_slope_total_mean)
-            self._slope_diff_rising = self.result_mean.edge_slope - min(self._arr_slope_total_mean)
-            self._slope_diff_falling = self._slope_total_mean - max(self._arr_slope_total_mean)
-
-            # if (self.result_mean.edge_slope - self._slope_total_mean) > 40 and self._new_edge_detected == 0:
-            #     self._new_edge_detected = 200
-            #     self._arr_slope_total_mean.clear()
-            #     self._arr_slope_total_mean.append(self.result_mean.edge_slope)
-            #
-            # if (self._slope_total_mean - self.result_mean.edge_slope) > 40 and self._new_edge_detected == 200:
-            #     self._new_edge_detected = 0
-            #     self._arr_slope_total_mean.clear()
-            #     self._arr_slope_total_mean.append(self.result_mean.edge_slope)
-
 
             if self.result_mean.edge_slope > self.edge_processing_settings.slope_threshold:
                 if self.edge_processing_settings.is_film_type_negative:
