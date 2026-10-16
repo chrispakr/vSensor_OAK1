@@ -13,23 +13,12 @@ SOCKET_BACKLOG = 1
 SOCKET_RETRY_DELAY = 3
 PROCESS_DELAY = 0.04
 REUSE_ADDR = 1
+CONN_SEND_TIMEOUT_S = 10
 
 @dataclass
 class SocketData:
     vs_front_data: Any
     vs_rear_data: Any
-
-class ActiveSocketConnections:
-    def __init__(self) -> None:
-        self._active_connections: List[Any] = []
-        self.connected_clients: int = 0
-
-    def register_new_connection(self, socket_data: Any) -> None:
-        self._active_connections.append(socket_data)
-        self.connected_clients = len(self._active_connections)
-
-    def get_client_list(self) -> List[Any]:
-        return self._active_connections
 
 class SocketHandler:
     def __init__(self, host: str, port: int, max_listeners: int = 3) -> None:
@@ -39,7 +28,6 @@ class SocketHandler:
         self.host_port = port
         self.max_listeners = max_listeners
 
-        self.active_connections = ActiveSocketConnections()
         self._server_socket: Optional[socket.socket] = None
         self._conn: Optional[socket.socket] = None
         self._addr: Optional[Tuple[str, int]] = None
@@ -99,6 +87,14 @@ class SocketHandler:
             
             self._server_socket.listen(SOCKET_BACKLOG)
             self._conn, self._addr = self._server_socket.accept()
+            # Without a timeout, sendall() below can block indefinitely if the
+            # client stops draining its receive buffer (e.g. hangs or is
+            # unreachable) - that would freeze this whole background thread
+            # and silently stop every future frame, even after the client
+            # recovers. A bounded timeout turns that into a normal
+            # disconnect/retry cycle instead.
+            self._conn.settimeout(CONN_SEND_TIMEOUT_S)
+            self._conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             self._client_connected = True
             self.logger.info(f"Server socket [TCP_IP: {self.host_ip}, TCP_PORT: {self.host_port}] is connected with client")
         except Exception as e:
