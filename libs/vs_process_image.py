@@ -1,4 +1,6 @@
 from collections import deque
+import copy
+import threading
 from typing import Tuple
 from numpy.typing import NDArray
 from dataclasses import dataclass
@@ -145,12 +147,15 @@ class CalcEdgeSlopeParameter:
         if self.image_data is not None and self.image_data.size > 0:
             try:
                 reduced = np.mean(self.image_data, axis=1)
-                self.slope_data = [(reduced[i + 3] - reduced[i - 3]) for i in range(3, len(reduced) - 3, 1)]
+                # slope[i] = reduced[i + 6] - reduced[i] (vectorized, same result as the former list comprehension)
+                slope = reduced[6:] - reduced[:-6]
 
-                self.slope_film_pos = min(self.slope_data)
-                self.slope_film_neg = max(self.slope_data)
-                self.pos_film_pos = self.slope_data.index(self.slope_film_pos)
-                self.pos_film_neg = self.slope_data.index(self.slope_film_neg)
+                self.pos_film_pos = int(np.argmin(slope))
+                self.pos_film_neg = int(np.argmax(slope))
+                self.slope_film_pos = slope[self.pos_film_pos]
+                self.slope_film_neg = slope[self.pos_film_neg]
+                # kept as list - it is pickled and sent to the live-view client
+                self.slope_data = slope.tolist()
             except ValueError as e:
                 self.logger.error(f"calculate edge slope error: {e} // img_size: {self.image_data.shape}")
                 traceback.print_exc()
@@ -253,8 +258,27 @@ class ProcessImageEdgeParameters:
         self.contrast_offset_data = CalculateContrast(vs_settings=self.edge_processing_settings)
         self._edge_detected: bool = False
         self._edge_in_position: bool = False
+        self._lock = threading.Lock()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
+    def snapshot(self) -> "ProcessImageEdgeParameters":
+        """Consistent deep copy, safe to hand to other threads (e.g. pickling in SocketHandler)."""
+        with self._lock:
+            return copy.deepcopy(self)
 
     def process_image(self, image_data:NDArray):
+        with self._lock:
+            self._process_image(image_data)
+
+    def _process_image(self, image_data:NDArray):
         if image_data is not None:
             self._t_edge_position = -1
             self.image_np = image_data
@@ -276,8 +300,8 @@ class ProcessImageEdgeParameters:
             else:
                 self._edge_position_tile_diff = abs(self.left_tile_slope_data.pos_film_pos - self.right_tile_slope_data.pos_film_pos)
                 self.result_mean.edge_slope = abs(self.left_tile_slope_data.slope_film_pos + self.right_tile_slope_data.slope_film_pos)
-                self.result_tile_left.edge_slope = self.left_tile_slope_data.slope_film_neg
-                self.result_tile_right.edge_slope = self.right_tile_slope_data.slope_film_neg
+                self.result_tile_left.edge_slope = self.left_tile_slope_data.slope_film_pos
+                self.result_tile_right.edge_slope = self.right_tile_slope_data.slope_film_pos
 
             self._arr_slope_total_mean.append(self.result_mean.edge_slope)
             self._slope_total_mean = sum(self._arr_slope_total_mean) // len(self._arr_slope_total_mean)
@@ -326,8 +350,8 @@ class ProcessImageEdgeParameters:
                 self.result_tile_right.edge_position = self.right_tile_slope_data.pos_film_pos
                 self.result_tile_left.edge_position = self.left_tile_slope_data.pos_film_pos
                 self.result_mean.edge_state = self._get_edge_state(self.result_mean.edge_position)
-                self.result_tile_left.edge_state = self._get_edge_state(edge_position=self.left_tile_slope_data.pos_film_neg)
-                self.result_tile_right.edge_state = self._get_edge_state(edge_position=self.right_tile_slope_data.pos_film_neg)
+                self.result_tile_left.edge_state = self._get_edge_state(edge_position=self.left_tile_slope_data.pos_film_pos)
+                self.result_tile_right.edge_state = self._get_edge_state(edge_position=self.right_tile_slope_data.pos_film_pos)
 
             # print(self.result_tile_right.edge_state, self.result_tile_right.edge_state, self.result_mean.edge_state)
 

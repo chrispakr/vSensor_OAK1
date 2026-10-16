@@ -7,6 +7,7 @@ import depthai as dai
 import time
 from datetime import datetime
 import contextlib
+import functools
 import sys
 from timeloop import Timeloop
 import libs.functions as helper
@@ -40,7 +41,9 @@ main_logger = log_handler.setup_logger(
 
 main_logger.info("Start visionSensorM4")
 
-helper.delete_old_files(directory=FULL_LOG_DIR)
+LOG_MAX_AGE_DAYS = 7
+
+helper.delete_old_files(directory=FULL_LOG_DIR, days=LOG_MAX_AGE_DAYS, logger=main_logger)
 
 main_logger.info(f"HOME DIRECTORY: {HOME_DIR}")
 main_logger.info(f"INITIALIZATION FILE: {INIT_CONFIG_FILE}")
@@ -138,6 +141,9 @@ vs_rear_processing_settings = ProcessEdgeSettings(
     # stop_offset=plc_handler.vs_ctrl.vsLeftStopOffset.value,
 )
 
+# set by both camera threads whenever a new frame was processed - wakes up the main loop
+new_image_event = threading.Event()
+
 cam_vs_front = VisionSensor(
     device_info_front_sensor,
     vs_name="vs_front",
@@ -151,6 +157,7 @@ cam_vs_front = VisionSensor(
     raw_image_width=plc_handler.vs_ctrl.rawImageWidth.value,
     flip_image=False,
     fps=config_handler.general.fps,
+    new_image_event=new_image_event,
 )
 
 cam_vs_rear = VisionSensor(
@@ -166,6 +173,7 @@ cam_vs_rear = VisionSensor(
     raw_image_width=plc_handler.vs_ctrl.rawImageWidth.value,
     flip_image=True,
     fps=config_handler.general.fps,
+    new_image_event=new_image_event,
 )
 
 def cb_auto_exposure_cameras_finished():
@@ -179,7 +187,7 @@ def cb_auto_exposure_cameras_finished():
         plc_handler.vs_ctrl.isConnected.value = True
 
 def cb_auto_focus_finished():
-    if not cam_vs_front.autofocus_in_progress and not cam_vs_rear.auto_exposure_in_progress:
+    if not cam_vs_front.autofocus_in_progress and not cam_vs_rear.autofocus_in_progress:
         main_logger.info("AutoFocus Finished")
         main_logger.info(f"Lens-Position cam_front: {cam_vs_front.lens_position}")
         main_logger.info(f"Lens-Position cam_rear : {cam_vs_rear.lens_position}")
@@ -305,17 +313,35 @@ mqtt = mqtt_communication_handler.MqttHandler(logger_enabled=True, client_type="
 
 tl = Timeloop()
 
+def log_exceptions(func):
+    """An unhandled exception ends the Timeloop job thread for good (e.g. heartbeat stops silently)."""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            main_logger.exception(f"Timeloop job '{func.__name__}' failed")
+    return wrapper
+
 @tl.job(interval=timedelta(seconds=3))
+@log_exceptions
 def mqtt_heartbeat():
     mqtt.pTopics_vsController.set_vsController_heartbeat.value = 3
 
 vs_heartbeat_state = False
 
 @tl.job(interval=timedelta(seconds=1))
+@log_exceptions
 def ads_heartbeat():
     global vs_heartbeat_state
     vs_heartbeat_state = not vs_heartbeat_state
     plc_handler.vs_ctrl.vsHeartBeat.value = vs_heartbeat_state
+
+# the sensor runs for weeks without restart - clean up old logs periodically, not only at startup
+@tl.job(interval=timedelta(hours=24))
+@log_exceptions
+def cleanup_old_logs():
+    helper.delete_old_files(directory=FULL_LOG_DIR, days=LOG_MAX_AGE_DAYS, logger=main_logger)
 
 tl.start()
 
@@ -335,8 +361,12 @@ atexit.register(exit_handler)
 signal.signal(signal.SIGINT, kill_handler)
 signal.signal(signal.SIGTERM, kill_handler)
 
-interval_send_edge_position = helper.IntervalTimer(interval=0.01)
-send_vs_front_edge_position = False
+vs_right_edge_state = helper.WriteOnChange(plc_handler.vs_ctrl.vsRightEdgeState)
+vs_right_edge_position = helper.WriteOnChange(plc_handler.vs_ctrl.vsRightEdgePosition)
+vs_right_sensor_fps = helper.WriteOnChange(plc_handler.vs_ctrl.vsRightSensorFps)
+vs_left_edge_state = helper.WriteOnChange(plc_handler.vs_ctrl.vsLeftEdgeState)
+vs_left_edge_position = helper.WriteOnChange(plc_handler.vs_ctrl.vsLeftEdgePosition)
+vs_left_sensor_fps = helper.WriteOnChange(plc_handler.vs_ctrl.vsLeftSensorFps)
 
 interval_poll_ads = helper.IntervalTimer(interval=0.1)
 
@@ -345,6 +375,9 @@ vs_rear_send_mqtt_image = True
 
 with (contextlib.ExitStack() as stack):
     while True:
+        # wake up as soon as one of the cameras has a new frame, but at least every 10ms for ADS polling / MQTT
+        new_image_event.wait(timeout=0.01)
+        new_image_event.clear()
 
         ##################################################################################################################
         # ADS POLLING PART
@@ -358,28 +391,23 @@ with (contextlib.ExitStack() as stack):
         ##################################################################################################################
 
         if cam_vs_front.new_image_available:
-            plc_handler.vs_ctrl.vsRightEdgeState.value = cam_vs_front.results.result_mean.edge_state
+            vs_right_edge_position.write(cam_vs_front.results.result_mean.edge_position)
+            vs_right_edge_state.write(cam_vs_front.results.result_mean.edge_state)
             if plc_handler.vs_ctrl.enableLiveView.value:
                 if vs_front_live_view_frame_nr == live_view_fps_divider:
-                    main_logger.info("send image over socket_handler")
+                    main_logger.debug("send image over socket_handler")
                     socket_handler.send_image(
-                        vs_front_slope_data=cam_vs_front.results,
-                        vs_rear_slope_data=cam_vs_rear.results,
+                        vs_front_slope_data=cam_vs_front.results.snapshot(),
+                        vs_rear_slope_data=cam_vs_rear.results.snapshot(),
                     )
                     vs_front_live_view_frame_nr = 0
                 vs_front_live_view_frame_nr += 1
-            plc_handler.vs_ctrl.vsRightSensorFps.value = cam_vs_front.fps
+            vs_right_sensor_fps.write(cam_vs_front.fps)
 
         if cam_vs_rear.new_image_available:
-            plc_handler.vs_ctrl.vsLeftEdgeState.value = cam_vs_rear.results.result_mean.edge_state
-            plc_handler.vs_ctrl.vsLeftSensorFps.value = cam_vs_rear.fps
-
-        if interval_send_edge_position.is_time_to_update():
-            if send_vs_front_edge_position:
-                plc_handler.vs_ctrl.vsRightEdgePosition.value = cam_vs_front.results.result_mean.edge_position
-            else:
-                plc_handler.vs_ctrl.vsLeftEdgePosition.value = cam_vs_rear.results.result_mean.edge_position
-            send_vs_front_edge_position = not send_vs_front_edge_position
+            vs_left_edge_position.write(cam_vs_rear.results.result_mean.edge_position)
+            vs_left_edge_state.write(cam_vs_rear.results.result_mean.edge_state)
+            vs_left_sensor_fps.write(cam_vs_rear.fps)
 
         # if platform.system() == "Windows":
         #     pass
@@ -408,6 +436,4 @@ with (contextlib.ExitStack() as stack):
             mqtt.pTopics_vsController.set_vsRear_getImageHeight.value = cam_vs_rear.results.image_height
             mqtt.pTopics_vsController.set_vsRear_image_statistics.value = str(cam_vs_rear.calc_statistics())
             vs_rear_send_mqtt_image = False
-
-        time.sleep(0.0001)
 

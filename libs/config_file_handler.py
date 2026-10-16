@@ -1,6 +1,6 @@
 import os
 import json
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 from typing import Optional
 import traceback
 import logging
@@ -82,15 +82,15 @@ class ConfigFileHandler:
 
             # Load front camera config
             front_data = data.get('vs_front', {})
-            self.config.vs_front = VsConfigParameter(**front_data)
+            self.config.vs_front = self._from_dict(VsConfigParameter, front_data)
 
             # Load rear camera config
             rear_data = data.get('vs_rear', {})
-            self.config.vs_rear = VsConfigParameter(**rear_data)
+            self.config.vs_rear = self._from_dict(VsConfigParameter, rear_data)
 
             # Load general config
             general_data = data.get('general', {})
-            self.config.general = GeneralConfigObject(**general_data)
+            self.config.general = self._from_dict(GeneralConfigObject, general_data)
 
             self._log_all_settings()
         except Exception as e:
@@ -99,6 +99,18 @@ class ConfigFileHandler:
             traceback.print_exc()
             self.config = ConfigData()
             self.save_config()
+
+    def _from_dict(self, cls, data: dict):
+        """Creates a dataclass instance, ignoring keys that are no longer part of the dataclass.
+
+        Otherwise an init.json from an older version (e.g. with removed fields like lens_position)
+        would raise a TypeError and reset the whole config - including the camera serials.
+        """
+        known = {f.name for f in fields(cls)}
+        unknown = set(data) - known
+        if unknown:
+            self.logger.warning(f"Ignoring unknown config keys for {cls.__name__}: {sorted(unknown)}")
+        return cls(**{k: v for k, v in data.items() if k in known})
 
     def _log_all_settings(self) -> None:
         """Logs all configuration settings."""

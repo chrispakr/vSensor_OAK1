@@ -36,6 +36,7 @@ class VisionSensor:
                  raw_image_width: int = 640,
                  flip_image:bool = False,
                  fps: int = 60,
+                 new_image_event: Optional[threading.Event] = None,
                  ):
         # general Variables
         super().__init__()
@@ -66,6 +67,7 @@ class VisionSensor:
         )
 
         self._new_image_available = False
+        self._new_image_event = new_image_event
         self.is_running = False
 
         # processing image_np variables
@@ -185,13 +187,17 @@ class VisionSensor:
                     raise
                 time.sleep(self.DEVICE_CONNECT_RETRY_DELAY_S)
 
-        self._image_edge_queue = self._device.getOutputQueue(name="image_edge_detection", maxSize=4, blocking=True)
+        # only the newest frame is of interest - with a deeper blocking queue a slow host would process stale frames
+        self._image_edge_queue = self._device.getOutputQueue(name="image_edge_detection", maxSize=1, blocking=False)
         self._camera_control_queue = self._device.getInputQueue('control')
 
     def _process_image(self):
         while True:
-            if self.is_running:
-                self._sensor_image_data = self._image_edge_queue.tryGet()
+            if not self.is_running:
+                time.sleep(0.01)
+            else:
+                # blocks until the next frame arrives (instead of busy polling with tryGet)
+                self._sensor_image_data = self._image_edge_queue.get()
                 if self._sensor_image_data is not None:
                     self._fps_counter += 1
                     self._image_info_jpg = None
@@ -250,7 +256,8 @@ class VisionSensor:
                                 self._cb_auto_exposure_finished()
 
                     self._new_image_available = True
-            time.sleep(0.0001)
+                    if self._new_image_event is not None:
+                        self._new_image_event.set()
 
     def get_base64_image(self):
         try:
@@ -332,7 +339,7 @@ class VisionSensor:
         return np.concatenate((stat_image_tile_left, stat_image_tile_right), axis=1)
 
     @staticmethod
-    def _calculate_histogram_bounds(self, image: np.ndarray, max_value: int,
+    def _calculate_histogram_bounds(image: np.ndarray, max_value: int,
                                     clip_percent: float) -> Tuple[float, float]:
         """Calculate histogram clipping bounds based on a given percentage."""
         hist = cv2.calcHist([image], [0], None, [max_value], [0, max_value]).flatten()
@@ -360,10 +367,10 @@ class VisionSensor:
         return clip_min, clip_max
 
     @staticmethod
-    def _calculate_image_statistics(self, image: np.ndarray) -> Tuple[float, float]:
+    def _calculate_image_statistics(image: np.ndarray) -> Tuple[float, float]:
         """Calculate mean and standard deviation of the image."""
         mean, std_dev = cv2.meanStdDev(image)
-        return mean.flatten()[0], std_dev.flatten()[0]
+        return float(mean.flatten()[0]), float(std_dev.flatten()[0])
 
     @property
     def new_image_available(self):
