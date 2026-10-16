@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 import contextlib
 import functools
+import logging
 import sys
 from timeloop import Timeloop
 import libs.functions as helper
@@ -38,6 +39,14 @@ main_logger = log_handler.setup_logger(
     logfile=os.path.join(FULL_LOG_DIR, f"log_{timestamp}.log"),
     # level="DEBUG",
 )
+
+# mqtt_handler and some libs log to "base.*" - route them into the same log file / console / ring buffer,
+# otherwise only WARNING+ would reach stderr via Python's last-resort handler
+base_logger = logging.getLogger("base")
+base_logger.setLevel(main_logger.level)
+base_logger.propagate = False
+for _handler in main_logger.handlers:
+    base_logger.addHandler(_handler)
 
 main_logger.info("Start visionSensorM4")
 
@@ -423,15 +432,14 @@ with (contextlib.ExitStack() as stack):
         #     vs_rear_send_mqtt_image = True
         #     plc_handler.vs_ctrl.captureImage.value = False
 
-        if vs_front_send_mqtt_image:
-            mqtt.pTopics_vsController.set_vsFront_imageData.value = cam_vs_front.get_base64_image()
+        # image size / statistics (no image data anymore) - wait for the first processed frame, otherwise 0x0 / None would be sent
+        if vs_front_send_mqtt_image and cam_vs_front.has_image:
             mqtt.pTopics_vsController.set_vsFront_getImageWidth.value = cam_vs_front.results.image_width
             mqtt.pTopics_vsController.set_vsFront_getImageHeight.value = cam_vs_front.results.image_height
             mqtt.pTopics_vsController.set_vsFront_image_statistics.value = str(cam_vs_front.calc_statistics())
             vs_front_send_mqtt_image = False
 
-        if vs_rear_send_mqtt_image:
-            mqtt.pTopics_vsController.set_vsRear_imageData.value = cam_vs_rear.get_base64_image()
+        if vs_rear_send_mqtt_image and cam_vs_rear.has_image:
             mqtt.pTopics_vsController.set_vsRear_getImageWidth.value = cam_vs_rear.results.image_width
             mqtt.pTopics_vsController.set_vsRear_getImageHeight.value = cam_vs_rear.results.image_height
             mqtt.pTopics_vsController.set_vsRear_image_statistics.value = str(cam_vs_rear.calc_statistics())

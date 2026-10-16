@@ -5,9 +5,6 @@ from depthai import DeviceInfo
 import libs.vs_process_image as vps
 import depthai as dai
 import numpy as np
-from turbojpeg import TurboJPEG
-import platform
-import base64
 import cv2
 import time
 import logging
@@ -18,6 +15,9 @@ class VisionSensor:
     fps_report_time = 3
     DEVICE_CONNECT_RETRIES = 5
     DEVICE_CONNECT_RETRY_DELAY_S = 2.0
+    EXPOSURE_TOLERANCE_US = 50
+    EXPOSURE_TOLERANCE_REL = 0.02
+    EXPOSURE_RESEND_INTERVAL_S = 1.0
 
     def __init__(self,
                  device_info: DeviceInfo,
@@ -50,6 +50,9 @@ class VisionSensor:
         self._lens_position = lens_position
         self._exposure_time = exposure_time
         self._requested_exposure_time = exposure_time
+        # set via initialControl in the pipeline
+        self._sent_exposure_time = exposure_time
+        self._exposure_sent_time = time.monotonic()
         self._preview_width = preview_width
         self._preview_height = preview_height
         self._camera_center_position = camera_center_position
@@ -67,16 +70,15 @@ class VisionSensor:
         )
 
         self._new_image_available = False
+        self._has_image = False
         self._new_image_event = new_image_event
+        self._clamp_warned = set()
         self.is_running = False
 
         # processing image_np variables
         self._sensor_image_data = None
         self._raw_input_image = None
         self._proc_image_centered = None
-
-        self._image_info_jpg = None
-        self._image_info_base64 = None
 
         # fps variables
         self.fps = 0
@@ -105,14 +107,6 @@ class VisionSensor:
         self._camera_control_queue = None
         self.logger.info(f"init camera {self.device_info}")
         # self.logger.info(self.settings.__dict__)
-        if platform.system() == "Windows":
-            self.logger.info(f"set parameters for windows-system")
-            self.jpeg = TurboJPEG("libs/libturbojpeg.dll")
-
-        if platform.system() == "Linux":
-            self.logger.info(f"set parameters for linux-system")
-            self.jpeg = TurboJPEG()
-
         self.init_camera()
 
         self.camera_task = threading.Thread(target=self._process_image)
@@ -200,37 +194,36 @@ class VisionSensor:
                 self._sensor_image_data = self._image_edge_queue.get()
                 if self._sensor_image_data is not None:
                     self._fps_counter += 1
-                    self._image_info_jpg = None
-                    self._image_info_base64 = None
                     self._raw_input_image = self._sensor_image_data.getCvFrame()
 
                     (full_image_height, full_image_width) = self._raw_input_image.shape[:2]
-                    self._proc_image_centered = self._raw_input_image[
-                                                0 : full_image_height,
-                                                (full_image_width // 2) - self._camera_center_position - (self._preview_width // 2):
-                                                (full_image_width // 2) - self._camera_center_position + (self._preview_width // 2):
-                                                ]
+                    start_width, end_width = self._clamped_window(
+                        center=(full_image_width // 2) - self._camera_center_position,
+                        width=self._preview_width,
+                        total=full_image_width,
+                        what="camera_center_position",
+                    )
+                    self._proc_image_centered = self._raw_input_image[0 : full_image_height, start_width : end_width]
 
                     (centered_image_height, centered_image_width) = self._proc_image_centered.shape[:2]
                     start_height = 0
                     end_height = self._raw_image_height
-                    start_width = (centered_image_width // 2) - (self._raw_image_width // 2)
-                    end_width = (centered_image_width // 2) + (self._raw_image_width // 2)
+                    start_width, end_width = self._clamped_window(
+                        center=centered_image_width // 2,
+                        width=self._raw_image_width,
+                        total=centered_image_width,
+                        what="raw_image_width",
+                    )
                     self.proc_image_roi = self._proc_image_centered[start_height: end_height, start_width: end_width]
 
                     self.results.process_image(
                         image_data=self.proc_image_roi
                     )
 
-                    if int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000) != self._exposure_time:
-                        self._exposure_time = int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000)
+                    self._exposure_time = int(self._sensor_image_data.getExposureTime().total_seconds() * 1000000)
 
-                    if not self.auto_exposure_in_progress and self._exposure_time != self._requested_exposure_time:
-                        cam_ctrl = dai.CameraControl()
-                        cam_ctrl.setManualExposure(self._requested_exposure_time, self._iso)
-                        cam_ctrl.setAutoExposureLock(True)
-                        with self._camera_control_lock:
-                            self._camera_control_queue.send(cam_ctrl)
+                    if not self.auto_exposure_in_progress:
+                        self._apply_requested_exposure()
 
                     if self._sensor_image_data.getLensPosition() != self._lens_position:
                         self._lens_position = self._sensor_image_data.getLensPosition()
@@ -251,27 +244,63 @@ class VisionSensor:
                             with self._camera_control_lock:
                                 self._camera_control_queue.send(cam_ctrl)
                             self._requested_exposure_time = self._exposure_time
+                            # the camera is already locked at this exposure - nothing to send
+                            self._sent_exposure_time = self._exposure_time
                             self.auto_exposure_in_progress = False
                             if self._cb_auto_exposure_finished is not None:
                                 self._cb_auto_exposure_finished()
 
                     self._new_image_available = True
+                    self._has_image = True
                     if self._new_image_event is not None:
                         self._new_image_event.set()
 
-    def get_base64_image(self):
-        try:
-            self.logger.debug("create base64 image_np-data")
-            if self._proc_image_centered is not None:
-                image_np_color = cv2.cvtColor(self._proc_image_centered, cv2.COLOR_GRAY2RGB)
-                self._image_info_jpg = self.jpeg.encode(image_np_color, quality=80)
-                self._image_info_base64 = base64.b64encode(self._image_info_jpg)
-                return self._image_info_base64
-            return None
-        except Exception as e:
-            self.logger.error(e)
-            traceback.print_exc()
-            return None
+    def _clamped_window(self, center: int, width: int, total: int, what: str) -> Tuple[int, int]:
+        """Returns (start, end) of a `width` wide window around `center`, shifted to stay inside [0, total].
+
+        Without clamping a negative start index would wrap around in numpy slicing and yield an
+        empty or wrong image section.
+        """
+        start = center - (width // 2)
+        clamped_start = max(0, min(start, total - width))
+        end = min(total, clamped_start + width)
+        if clamped_start != start:
+            if what not in self._clamp_warned:
+                self._clamp_warned.add(what)
+                self.logger.warning(
+                    f"image window out of range ({what}): start={start}, width={width}, image_width={total} "
+                    f"- clamped to [{clamped_start}:{end}]"
+                )
+        else:
+            self._clamp_warned.discard(what)
+        return clamped_start, end
+
+    def _apply_requested_exposure(self):
+        """Sends the requested exposure to the camera once per change.
+
+        The sensor quantizes the exposure time, so the measured value may never exactly match the
+        requested one. Only if it stays off by more than the tolerance, the command is re-sent
+        (at most every EXPOSURE_RESEND_INTERVAL_S) - e.g. if a control message got lost.
+        """
+        now = time.monotonic()
+        tolerance = max(self.EXPOSURE_TOLERANCE_US, self._requested_exposure_time * self.EXPOSURE_TOLERANCE_REL)
+        changed = self._requested_exposure_time != self._sent_exposure_time
+        deviates = abs(self._exposure_time - self._requested_exposure_time) > tolerance
+        resend_due = (now - self._exposure_sent_time) >= self.EXPOSURE_RESEND_INTERVAL_S
+
+        if changed or (deviates and resend_due):
+            cam_ctrl = dai.CameraControl()
+            cam_ctrl.setManualExposure(self._requested_exposure_time, self._iso)
+            cam_ctrl.setAutoExposureLock(True)
+            with self._camera_control_lock:
+                self._camera_control_queue.send(cam_ctrl)
+            self._sent_exposure_time = self._requested_exposure_time
+            self._exposure_sent_time = now
+
+    @property
+    def has_image(self) -> bool:
+        """True once the first frame has been processed (image and results are valid)."""
+        return self._has_image
 
     def calc_statistics(self) -> Optional[Tuple[float, float, float, float, float, float]]:
         """Calculate image statistics including min/max values and clipped histogram bounds.
